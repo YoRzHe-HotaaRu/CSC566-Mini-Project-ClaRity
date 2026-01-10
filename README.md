@@ -1,6 +1,4 @@
-<div align="center">
 # 🛣️ Automated Road Surface Layers Analysis using Texture-Based Image Segmentation
-</div>
 
 <div align="center">
 
