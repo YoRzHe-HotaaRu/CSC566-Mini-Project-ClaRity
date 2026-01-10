@@ -15,9 +15,8 @@
 
 ## 📚 Project Information
 
-| Attribute | Details |
-|-----------|---------|
 | **Project Title** | Automated Road Surface Layers Analysis using Texture-Based Image Segmentation |
+|-----------|---------|
 | **Course** | CSC566 - Image Processing |
 | **Group Name** | ClaRity Group |
 | **Group** | A4CDCS2306A |
