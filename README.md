@@ -610,7 +610,7 @@ This project is for academic purposes as part of the CSC566 Image Processing cou
 
 <div align="center">
 
-**Made with ❤️ by ClaRity Group**
+**Made by ClaRity Group**
 
 *CSC566 Image Processing | UiTM Cawangan Perak Kampus Tapah*
 
