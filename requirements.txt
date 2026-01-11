@@ -1,3 +1,15 @@
+# ============================================
+# Road Surface Layer Analyzer - Dependencies
+# CSC566 Image Processing Mini Project
+# ============================================
+# 
+# For NVIDIA RTX 4050 GPU with CUDA support:
+# Install PyTorch with CUDA 12.x support:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# Or run: pip install -r requirements.txt
+# ============================================
+
 # Core Libraries
 numpy>=1.24.0
 opencv-python>=4.8.0
@@ -10,7 +22,9 @@ pillow>=10.0.0
 # GUI
 PyQt5>=5.15.0
 
-# Deep Learning (CUDA support)
+# Deep Learning (CUDA 12.x support for RTX 4050)
+# NOTE: Install PyTorch separately with CUDA:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 torch>=2.0.0
 torchvision>=0.15.0
 segmentation-models-pytorch>=0.3.0
@@ -26,3 +40,4 @@ pytest-benchmark>=4.0.0
 
 # Utilities
 tqdm>=4.66.0
+
