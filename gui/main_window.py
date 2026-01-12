@@ -925,6 +925,10 @@ class MainWindow(QMainWindow):
         """Update legend to show only detected layers."""
         import numpy as np
         
+        # Hide placeholder and show legend widget
+        self.legend_placeholder.setVisible(False)
+        self.legend_widget.setVisible(True)
+        
         # Get unique layer labels (excluding background 0)
         unique_labels = np.unique(labels)
         detected_layers = [int(l) for l in unique_labels if l > 0]
