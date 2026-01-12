@@ -1,4 +1,4 @@
-﻿"""
+"""
 Main Window for Road Surface Layer Analyzer GUI
 PyQt5-based application with 4 analysis modes.
 
@@ -323,13 +323,14 @@ class MainWindow(QMainWindow):
         
         # Layer legend
         self.legend_group = QGroupBox("Layer Legend")
-        self.legend_group.setMaximumHeight(80)  # Prevent legend from taking too much space
+        self.legend_group.setMaximumHeight(90)  # Compact height for wrapped centered text
         legend_layout = QVBoxLayout(self.legend_group)  # Changed to QVBoxLayout for message
         legend_layout.setContentsMargins(5, 5, 5, 5)  # Compact margins
 
         # Create placeholder label
         self.legend_placeholder = QLabel("After running the Analysis, the legend will show up here")
-        self.legend_placeholder.setStyleSheet("""color: #888; font-style: italic; padding: 10px;""")
+        self.legend_placeholder.setWordWrap(True)  # Enable word wrapping to prevent cutoff
+        self.legend_placeholder.setStyleSheet("color: #888; font-style: italic; padding: 10px; font-size: 12px;")  # Adjusted font size
         self.legend_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         legend_layout.addWidget(self.legend_placeholder)
 
@@ -988,3 +989,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
