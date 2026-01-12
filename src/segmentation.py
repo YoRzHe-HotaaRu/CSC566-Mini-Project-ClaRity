@@ -141,11 +141,11 @@ def kmeans_with_texture(
 # =============================================================================
 
 def slic_segment(
-    image: np.ndarray,
-    n_segments: int = 200,
-    compactness: float = 10.0,
-    sigma: float = 1.0,
-    start_label: int = 0
+     image: np.ndarray,
+     n_segments: int = 200,
+     compactness: float = 10.0,
+     sigma: float = 1.0,
+     start_label: int = 1
 ) -> np.ndarray:
     """
     Segment image using SLIC superpixels.

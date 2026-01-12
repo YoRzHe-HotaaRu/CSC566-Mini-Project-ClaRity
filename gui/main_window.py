@@ -1,4 +1,4 @@
-"""
+﻿"""
 Main Window for Road Surface Layer Analyzer GUI
 PyQt5-based application with 4 analysis modes.
 
@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QLabel, QPushButton, QFileDialog, QGroupBox, QRadioButton,
     QSlider, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
     QProgressBar, QTextEdit, QSplitter, QFrame, QStatusBar,
-    QMenuBar, QMenu, QAction, QMessageBox, QTabWidget,
+    QMenuBar, QMenu, QAction, QMessageBox, QTabWidget, QStackedWidget,
     QScrollArea, QGridLayout
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
@@ -322,22 +322,42 @@ class MainWindow(QMainWindow):
         layout.addLayout(images_layout)
         
         # Layer legend
-        legend_group = QGroupBox("Layer Legend")
-        legend_layout = QHBoxLayout(legend_group)
-        
+        self.legend_group = QGroupBox("Layer Legend")
+        self.legend_group.setMaximumHeight(80)  # Prevent legend from taking too much space
+        legend_layout = QVBoxLayout(self.legend_group)  # Changed to QVBoxLayout for message
+        legend_layout.setContentsMargins(5, 5, 5, 5)  # Compact margins
+
+        # Create placeholder label
+        self.legend_placeholder = QLabel("After running the Analysis, the legend will show up here")
+        self.legend_placeholder.setStyleSheet("""color: #888; font-style: italic; padding: 10px;""")
+        self.legend_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        legend_layout.addWidget(self.legend_placeholder)
+
+        # Store legend items for dynamic updates
+        self.legend_items = {}
+        self.legend_widget = QWidget()  # Container for legend items
+        self.legend_layout = QHBoxLayout(self.legend_widget)  # Horizontal layout for items
+        self.legend_layout.setSpacing(15)  # Spacing between items
+
         for layer_num in range(1, 6):
             layer = ROAD_LAYERS[layer_num]
             color = layer["hex_color"]
             
             legend_item = QLabel(f"■ {layer['name']}")
-            legend_item.setStyleSheet(f"color: {color}; font-weight: bold; padding: 5px;")
-            legend_layout.addWidget(legend_item)
+            legend_item.setStyleSheet(f'''
+                color: {color}; 
+                font-weight: bold; 
+                padding: 2px 8px;
+                font-size: 10px;
+            ''')
+            legend_item.setVisible(False)  # Initially hidden
+            self.legend_items[layer_num] = legend_item
+            self.legend_layout.addWidget(legend_item)
         
-        legend_layout.addStretch()
-        layout.addWidget(legend_group)
-        
+        self.legend_layout.addStretch()
+        legend_layout.addWidget(self.legend_widget)  # Add legend widget to main layout
+        layout.addWidget(self.legend_group)
         return panel
-    
     def create_control_panel(self) -> QWidget:
         """Create control panel with parameters."""
         panel = QWidget()
@@ -358,24 +378,31 @@ class MainWindow(QMainWindow):
         mode_layout.addWidget(self.mode_vlm)
         mode_layout.addWidget(self.mode_hybrid)
         
+        # Connect mode buttons to dynamic panel switching
+        self.mode_classical.toggled.connect(lambda: self.switch_mode_panel("classical"))
+        self.mode_dl.toggled.connect(lambda: self.switch_mode_panel("deep_learning"))
+        self.mode_vlm.toggled.connect(lambda: self.switch_mode_panel("vlm"))
+        self.mode_hybrid.toggled.connect(lambda: self.switch_mode_panel("hybrid"))
+        
         layout.addWidget(mode_group)
         
-        # Parameters tab widget
-        self.params_tabs = QTabWidget()
+        # Dynamic parameters stack (different panels for each mode)
+        self.params_stack = QStackedWidget()
         
-        # Preprocessing tab
-        preprocess_tab = self.create_preprocessing_params()
-        self.params_tabs.addTab(preprocess_tab, "Preprocessing")
+        # Create mode-specific parameter panels
+        self.classical_params = self.create_classical_params()
+        self.params_stack.addWidget(self.classical_params)
         
-        # Features tab
-        features_tab = self.create_features_params()
-        self.params_tabs.addTab(features_tab, "Features")
+        self.dl_params = self.create_deep_learning_params()
+        self.params_stack.addWidget(self.dl_params)
         
-        # Segmentation tab
-        seg_tab = self.create_segmentation_params()
-        self.params_tabs.addTab(seg_tab, "Segmentation")
+        self.vlm_params = self.create_vlm_params()
+        self.params_stack.addWidget(self.vlm_params)
         
-        layout.addWidget(self.params_tabs)
+        self.hybrid_params = self.create_hybrid_params()
+        self.params_stack.addWidget(self.hybrid_params)
+        
+        layout.addWidget(self.params_stack)
         
         # Buttons
         buttons_layout = QHBoxLayout()
@@ -412,6 +439,212 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         
         return panel
+    
+    def switch_mode_panel(self, mode: str):
+        """Switch parameter panel based on selected analysis mode."""
+        mode_to_index = {
+            "classical": 0,
+            "deep_learning": 1,
+            "vlm": 2,
+            "hybrid": 3
+        }
+        self.params_stack.setCurrentIndex(mode_to_index.get(mode, 0))
+        self.status_bar.showMessage(f"Switched to {mode.replace('_', ' ').title()} mode")
+    
+    def create_classical_params(self) -> QWidget:
+        """Create Classical mode parameter panel with tabs."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Use tab widget for organized parameters
+        tabs = QTabWidget()
+        
+        # Preprocessing tab
+        preprocess_tab = self.create_preprocessing_params()
+        tabs.addTab(preprocess_tab, "Preprocessing")
+        
+        # Features tab
+        features_tab = self.create_features_params()
+        tabs.addTab(features_tab, "Features")
+        
+        # Segmentation tab
+        seg_tab = self.create_segmentation_params()
+        tabs.addTab(seg_tab, "Segmentation")
+        
+        layout.addWidget(tabs)
+        return widget
+    
+    def create_deep_learning_params(self) -> QWidget:
+        """Create Deep Learning mode parameter panel."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Model Settings group
+        model_group = QGroupBox("Model Settings")
+        model_layout = QGridLayout(model_group)
+        
+        # Backbone selection
+        model_layout.addWidget(QLabel("Backbone:"), 0, 0)
+        self.backbone_combo = QComboBox()
+        self.backbone_combo.addItems(["ResNet-101", "ResNet-50", "MobileNetV2"])
+        model_layout.addWidget(self.backbone_combo, 0, 1)
+        
+        # Pretrained
+        self.pretrained_check = QCheckBox("Use Pretrained (ImageNet)")
+        self.pretrained_check.setChecked(True)
+        model_layout.addWidget(self.pretrained_check, 1, 0, 1, 2)
+        
+        # Device selection
+        model_layout.addWidget(QLabel("Device:"), 2, 0)
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["CPU", "CUDA (GPU)"])
+        model_layout.addWidget(self.device_combo, 2, 1)
+        
+        layout.addWidget(model_group)
+        
+        # Inference Settings group
+        infer_group = QGroupBox("Inference Settings")
+        infer_layout = QGridLayout(infer_group)
+        
+        # Confidence threshold
+        infer_layout.addWidget(QLabel("Confidence Threshold:"), 0, 0)
+        self.confidence_spin = QDoubleSpinBox()
+        self.confidence_spin.setRange(0.0, 1.0)
+        self.confidence_spin.setValue(0.5)
+        self.confidence_spin.setSingleStep(0.1)
+        infer_layout.addWidget(self.confidence_spin, 0, 1)
+        
+        # Batch size
+        infer_layout.addWidget(QLabel("Batch Size:"), 1, 0)
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setRange(1, 16)
+        self.batch_spin.setValue(1)
+        infer_layout.addWidget(self.batch_spin, 1, 1)
+        
+        # Output resolution
+        infer_layout.addWidget(QLabel("Output Resolution:"), 2, 0)
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItems(["Original", "512x512", "256x256"])
+        infer_layout.addWidget(self.resolution_combo, 2, 1)
+        
+        layout.addWidget(infer_group)
+        layout.addStretch()
+        return widget
+    
+    def create_vlm_params(self) -> QWidget:
+        """Create VLM Analysis mode parameter panel."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # VLM Settings group
+        vlm_group = QGroupBox("VLM Settings")
+        vlm_layout = QGridLayout(vlm_group)
+        
+        # Model info
+        vlm_layout.addWidget(QLabel("Model:"), 0, 0)
+        vlm_layout.addWidget(QLabel("GLM-4.6V (via ZenMux API)"), 0, 1)
+        
+        # Analysis type
+        vlm_layout.addWidget(QLabel("Analysis Type:"), 1, 0)
+        self.vlm_type_combo = QComboBox()
+        self.vlm_type_combo.addItems(["Layer ID", "Detailed", "Comparison"])
+        vlm_layout.addWidget(self.vlm_type_combo, 1, 1)
+        
+        # Temperature
+        vlm_layout.addWidget(QLabel("Temperature:"), 2, 0)
+        self.temp_spin = QDoubleSpinBox()
+        self.temp_spin.setRange(0.0, 1.0)
+        self.temp_spin.setValue(0.3)
+        self.temp_spin.setSingleStep(0.1)
+        vlm_layout.addWidget(self.temp_spin, 2, 1)
+        
+        layout.addWidget(vlm_group)
+        
+        # Output Options group
+        output_group = QGroupBox("Output Options")
+        output_layout = QVBoxLayout(output_group)
+        
+        self.vlm_layer_check = QCheckBox("Include Layer Name")
+        self.vlm_layer_check.setChecked(True)
+        output_layout.addWidget(self.vlm_layer_check)
+        
+        self.vlm_conf_check = QCheckBox("Include Confidence")
+        self.vlm_conf_check.setChecked(True)
+        output_layout.addWidget(self.vlm_conf_check)
+        
+        self.vlm_material_check = QCheckBox("Include Material Description")
+        self.vlm_material_check.setChecked(True)
+        output_layout.addWidget(self.vlm_material_check)
+        
+        self.vlm_texture_check = QCheckBox("Include Texture Description")
+        self.vlm_texture_check.setChecked(True)
+        output_layout.addWidget(self.vlm_texture_check)
+        
+        self.vlm_recom_check = QCheckBox("Include Recommendations")
+        self.vlm_recom_check.setChecked(False)
+        output_layout.addWidget(self.vlm_recom_check)
+        
+        layout.addWidget(output_group)
+        layout.addStretch()
+        return widget
+    
+    def create_hybrid_params(self) -> QWidget:
+        """Create Hybrid mode parameter panel."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Hybrid Settings group
+        hybrid_group = QGroupBox("Hybrid Settings")
+        hybrid_layout = QGridLayout(hybrid_group)
+        
+        # Primary method
+        hybrid_layout.addWidget(QLabel("Primary Method:"), 0, 0)
+        self.primary_combo = QComboBox()
+        self.primary_combo.addItems(["Classical", "Deep Learning", "VLM"])
+        hybrid_layout.addWidget(self.primary_combo, 0, 1)
+        
+        # AI Validation
+        self.ai_validation_check = QCheckBox("Enable VLM Cross-Check")
+        self.ai_validation_check.setChecked(True)
+        hybrid_layout.addWidget(self.ai_validation_check, 1, 0, 1, 2)
+        
+        # Weighting
+        hybrid_layout.addWidget(QLabel("Classical Weight:"), 2, 0)
+        self.classical_weight_spin = QSpinBox()
+        self.classical_weight_spin.setRange(0, 100)
+        self.classical_weight_spin.setValue(70)
+        self.classical_weight_spin.setSuffix("%")
+        hybrid_layout.addWidget(self.classical_weight_spin, 2, 1)
+        
+        hybrid_layout.addWidget(QLabel("AI Weight:"), 3, 0)
+        ai_label = QLabel("30%")
+        hybrid_layout.addWidget(ai_label, 3, 1)
+        self.ai_weight_label = ai_label
+        
+        # Update AI weight label when classical changes
+        self.classical_weight_spin.valueChanged.connect(
+            lambda v: ai_label.setText(f"{100-v}%")
+        )
+        
+        # Conflict resolution
+        hybrid_layout.addWidget(QLabel("Conflict Rule:"), 4, 0)
+        self.conflict_combo = QComboBox()
+        self.conflict_combo.addItems(["Higher Confidence Wins", "Primary Method Wins", "Average Confidences"])
+        hybrid_layout.addWidget(self.conflict_combo, 4, 1)
+        
+        layout.addWidget(hybrid_group)
+        
+        # Info text
+        info_label = QLabel(
+            "Hybrid mode combines classical texture analysis with AI validation. "
+            "Adjust weights to balance between fast classical processing and accurate AI analysis."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
     
     def create_preprocessing_params(self) -> QWidget:
         """Create preprocessing parameters widget."""
@@ -663,6 +896,9 @@ class MainWindow(QMainWindow):
         if "labels" in result:
             colored = create_colored_segmentation(result["labels"])
             self.result_label.setImage(colored)
+            
+            # Update legend to show only detected layers
+            self.update_legend(result["labels"])
         
         # Display results text
         classification = result.get("classification", {})
@@ -683,8 +919,25 @@ class MainWindow(QMainWindow):
             text += f"Correlation: {glcm.get('correlation', 0):.4f}\n"
         
         self.results_text.setText(text)
-        self.status_bar.showMessage("Analysis complete!")
-    
+        self.status_bar.showMessage("Analysis complete!")    
+    def update_legend(self, labels):
+        """Update legend to show only detected layers."""
+        import numpy as np
+        
+        # Get unique layer labels (excluding background 0)
+        unique_labels = np.unique(labels)
+        detected_layers = [int(l) for l in unique_labels if l > 0]
+        
+        # Show all layers if nothing detected, otherwise show only detected
+        show_all = len(detected_layers) == 0
+        
+        for layer_num in range(1, 6):
+            if layer_num in self.legend_items:
+                if show_all or layer_num in detected_layers:
+                    self.legend_items[layer_num].setVisible(True)
+                else:
+                    self.legend_items[layer_num].setVisible(False)
+
     def analysis_error(self, error: str):
         """Handle analysis error."""
         self.progress_bar.setVisible(False)

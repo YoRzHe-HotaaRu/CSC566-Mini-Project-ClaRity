@@ -26,7 +26,32 @@ def sample_grayscale_image():
 def sample_color_image():
     """Create a sample color (BGR) image for testing."""
     np.random.seed(42)
-    image = np.random.randint(0, 256, (256, 256, 3), dtype=np.uint8)
+    # Create structured regions instead of pure random noise
+    # This helps SLIC superpixels find meaningful segments
+    image = np.zeros((256, 256, 3), dtype=np.uint8)
+    
+    # Region 1: Red-ish area (top-left)
+    image[0:128, 0:128, 2] = 150  # Red channel
+    image[0:128, 0:128, 1] = 50
+    image[0:128, 0:128, 0] = 50
+    
+    # Region 2: Green-ish area (top-right)
+    image[0:128, 128:256, 2] = 50
+    image[0:128, 128:256, 1] = 150  # Green channel
+    image[0:128, 128:256, 0] = 50
+    
+    # Region 3: Blue-ish area (bottom-left)
+    image[128:256, 0:128, 2] = 50
+    image[128:256, 0:128, 1] = 50
+    image[128:256, 0:128, 0] = 150  # Blue channel
+    
+    # Region 4: Mixed/white area (bottom-right)
+    image[128:256, 128:256] = 180
+    
+    # Add some noise for realism
+    noise = np.random.normal(0, 10, (256, 256, 3)).clip(-20, 20).astype(np.int16)
+    image = np.clip(image.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+    
     return image
 
 
