@@ -172,6 +172,9 @@ class AnalysisWorker(QThread):
                     gray_3ch = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
                     blended = cv2.addWeighted(self.image, 0.7, gray_3ch, 0.3, 0)  # 30% gray blend
                     
+                    # Darken slightly
+                    blended = cv2.convertScaleAbs(blended, alpha=0.92, beta=-5)  # Slight darkening
+                    
                     # Apply MILD sharpening kernel
                     sharpen_kernel = np.array([[0, -0.5, 0],
                                                [-0.5,  3, -0.5],
