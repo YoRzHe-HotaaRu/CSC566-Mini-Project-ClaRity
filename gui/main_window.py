@@ -146,26 +146,78 @@ class AnalysisWorker(QThread):
 
                     result["classification"] = vlm_result
 
-                    # Create smart VLM visualization
+                    # Create INTERESTING VLM visualization - overlay on original image
                     h, w = self.image.shape[:2]
                     layer_num = vlm_result.get("layer_number", 1)
-                    
-                    # Create visualization with detected layer
-                    labels = np.ones((h, w), dtype=np.uint8) * layer_num
-                    
-                    # Add border to indicate image boundary
-                    border_width = min(h, w) // 20
-                    labels[:border_width, :] = 0
-                    labels[-border_width:, :] = 0
-                    labels[:, :border_width] = 0
-                    labels[:, -border_width:] = 0
-                    
-                    # Add confidence-based overlay
                     confidence = vlm_result.get("confidence", 0.5)
-                    if confidence < 0.7:
-                        noise_mask = np.random.random((h, w)) > confidence
-                        labels[noise_mask] = 0
+                    layer_name = vlm_result.get("layer_name", "Unknown")
                     
+                    # Get layer color from config
+                    from src.config import ROAD_LAYERS, LAYER_COLORS_RGB
+                    layer_color = LAYER_COLORS_RGB.get(layer_num, (128, 128, 128))
+                    
+                    # Create color overlay on original image
+                    overlay = self.image.copy()
+                    color_layer = np.zeros_like(self.image)
+                    color_layer[:] = layer_color[::-1]  # RGB to BGR
+                    
+                    # Blend original with layer color (30% color tint)
+                    alpha = 0.3
+                    blended = cv2.addWeighted(overlay, 1 - alpha, color_layer, alpha, 0)
+                    
+                    # Add edge detection for visual interest
+                    gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+                    edges = cv2.Canny(gray, 50, 150)
+                    edges_colored = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+                    
+                    # Highlight edges in layer color
+                    edge_mask = edges > 0
+                    blended[edge_mask] = [min(255, c + 50) for c in layer_color[::-1]]
+                    
+                    # Add text overlay with layer info
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = max(0.6, min(h, w) / 500)
+                    thickness = max(1, int(font_scale * 2))
+                    
+                    # Draw semi-transparent banner at top
+                    banner_height = int(h * 0.12)
+                    cv2.rectangle(blended, (0, 0), (w, banner_height), (0, 0, 0), -1)
+                    cv2.addWeighted(blended[0:banner_height, :], 0.7, 
+                                   self.image[0:banner_height, :], 0.3, 0, 
+                                   blended[0:banner_height, :])
+                    
+                    # Add layer name text
+                    text = f"Layer {layer_num}: {layer_name}"
+                    cv2.putText(blended, text, (10, int(banner_height * 0.45)), 
+                               font, font_scale, (255, 255, 255), thickness)
+                    
+                    # Add confidence bar
+                    conf_text = f"Confidence: {confidence:.0%}"
+                    cv2.putText(blended, conf_text, (10, int(banner_height * 0.85)), 
+                               font, font_scale * 0.7, (200, 200, 200), max(1, thickness - 1))
+                    
+                    # Draw confidence bar
+                    bar_width = int(w * 0.3)
+                    bar_x = w - bar_width - 20
+                    bar_y = int(banner_height * 0.6)
+                    bar_height = 12
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (100, 100, 100), -1)
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + int(bar_width * confidence), bar_y + bar_height), 
+                                 layer_color[::-1], -1)
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (255, 255, 255), 1)
+                    
+                    # Add corner decorations
+                    corner_size = min(40, min(h, w) // 10)
+                    cv2.line(blended, (5, banner_height + 10), (5, banner_height + 10 + corner_size), layer_color[::-1], 3)
+                    cv2.line(blended, (5, banner_height + 10), (5 + corner_size, banner_height + 10), layer_color[::-1], 3)
+                    cv2.line(blended, (w-5, h-10), (w-5, h-10-corner_size), layer_color[::-1], 3)
+                    cv2.line(blended, (w-5, h-10), (w-5-corner_size, h-10), layer_color[::-1], 3)
+                    
+                    # Store the enhanced visualization
+                    result["vlm_visualization"] = blended
+                    
+                    # Also create labels for legend compatibility
+                    labels = np.ones((h, w), dtype=np.uint8) * layer_num
                     result["labels"] = labels
                 except Exception as e:
                     self.error.emit(f"VLM analysis error: {str(e)}")
@@ -1058,54 +1110,72 @@ class MainWindow(QMainWindow):
         self.analyze_btn.setEnabled(True)
         self.save_btn.setEnabled(True)
         
-        # Display segmentation result
-        if "labels" in result:
+        # Display segmentation result - use VLM visualization if available
+        if "vlm_visualization" in result and self.mode == "vlm":
+            # Use the enhanced VLM overlay visualization
+            self.result_label.setImage(result["vlm_visualization"])
+        elif "labels" in result:
             colored = create_colored_segmentation(result["labels"])
             self.result_label.setImage(colored)
-            
-            # Update legend to show only detected layers
+        
+        # Update legend
+        if "labels" in result:
             self.update_legend(result["labels"])
         
-        # Display results text
+        # Display results text - respecting Output Options for VLM mode
         classification = result.get("classification", {})
         features = result.get("features", {})
         
         text = "═══ ANALYSIS RESULTS ═══\n\n"
         
-        # Layer identification
-        layer_name = classification.get('layer_name', classification.get('full_name', 'N/A'))
-        confidence = classification.get('confidence', 0)
-        text += f"🔍 Detected Layer: {layer_name}\n"
-        text += f"📊 Confidence: {confidence:.1%}\n"
+        # Check VLM Output Options (only apply to VLM mode)
+        is_vlm = self.mode == "vlm"
+        show_layer = not is_vlm or self.vlm_layer_check.isChecked()
+        show_confidence = not is_vlm or self.vlm_conf_check.isChecked()
+        show_material = not is_vlm or self.vlm_material_check.isChecked()
+        show_texture = not is_vlm or self.vlm_texture_check.isChecked()
+        show_recommendations = not is_vlm or self.vlm_recom_check.isChecked()
         
-        # Material info
+        # Layer identification (controlled by Include Layer Name)
+        layer_name = classification.get('layer_name', classification.get('full_name', 'N/A'))
+        if show_layer:
+            text += f"🔍 Detected Layer: {layer_name}\n"
+        
+        # Confidence (controlled by Include Confidence)
+        confidence = classification.get('confidence', 0)
+        if show_confidence:
+            text += f"📊 Confidence: {confidence:.1%}\n"
+        
+        # Material info (controlled by Include Material Description)
         material = classification.get('material', 'N/A')
-        if material and material != 'N/A':
+        if show_material and material and material != 'N/A':
             text += f"🧱 Material: {material}\n"
         
-        # Method used
+        # Method used (always show)
         method = classification.get('method', 'N/A')
         if method == 'N/A':
             method = "VLM Analysis (GLM-4.6V)"
         text += f"⚙️  Method: {method}\n"
         
-        # Layer number
+        # Layer number (always show if available)
         layer_num = classification.get('layer_number')
         if layer_num:
             text += f"🔢 Layer Number: {layer_num}\n"
         
-        # VLM-specific fields
+        # VLM-specific fields - controlled by Output Options
+        # Texture Description (controlled by Include Texture Description)
         texture = classification.get('texture_description')
-        if texture and texture != 'N/A':
+        if show_texture and texture and texture != 'N/A':
             text += f"\n🎨 Texture Description:\n   {texture}\n"
         
         reasoning = classification.get('reasoning')
         if reasoning and reasoning != 'N/A':
             text += f"\n🧠 Analysis Reasoning:\n   {reasoning}\n"
         
+        # Additional Notes / Recommendations (controlled by Include Recommendations)
         notes = classification.get('additional_notes')
-        if notes and notes != 'N/A':
-            text += f"\n📝 Additional Notes:\n   {notes}\n"
+        if show_recommendations and notes and notes != 'N/A':
+            text += f"\n📝 Recommendations:\n   {notes}\n"
         
         # GLCM features (only for classical/hybrid modes)
         if "glcm" in features and self.mode in ["classical", "hybrid"]:
@@ -1118,8 +1188,8 @@ class MainWindow(QMainWindow):
         
         self.results_text.setText(text)
         
-        # Generate plain-English summary
-        self.generate_summary(result, classification)
+        # Generate plain-English summary (also respects Output Options)
+        self.generate_summary(result, classification, show_material, show_texture, show_recommendations)
         
         self.status_bar.showMessage("Analysis complete!")    
     def update_legend(self, labels):
@@ -1163,7 +1233,9 @@ class MainWindow(QMainWindow):
                     ''')
                     self.legend_items[layer_num].setText(f"■ {layer['name']}")
 
-    def generate_summary(self, result: dict, classification: dict):
+    def generate_summary(self, result: dict, classification: dict, 
+                         show_material: bool = True, show_texture: bool = True, 
+                         show_recommendations: bool = True):
         """Generate plain-English summary for non-technical users."""
         mode = self.mode if hasattr(self, 'mode') else self.get_current_mode()
 
@@ -1185,21 +1257,22 @@ class MainWindow(QMainWindow):
             else:
                 summary += f"The model has low confidence ({confidence:.0%}) - consider using another analysis mode.\n\n"
 
-            # Material explanation
-            if material and material != 'N/A':
+            # Material explanation (controlled by Output Options)
+            if show_material and material and material != 'N/A':
                 summary += f"Material: {material}\n\n"
 
-            # Simple explanation
-            if "Aggregate" in layer_name:
-                summary += "What this means: This layer shows loose stones/gravel used for drainage and stability.\n"
-            elif "Sub-base" in layer_name:
-                summary += "What this means: This is a foundational layer that distributes loads evenly.\n"
-            elif "Base Course" in layer_name:
-                summary += "What this means: This is the main structural layer that bears traffic loads.\n"
-            elif "Asphalt" in layer_name or "Surface" in layer_name:
-                summary += "What this means: This is the top wearing course that vehicles travel on.\n"
-            elif "Soil" in layer_name or "Subgrade" in layer_name:
-                summary += "What this means: This is the natural soil foundation beneath all road layers.\n"
+            # Simple explanation (controlled by show_recommendations)
+            if show_recommendations:
+                if "Aggregate" in layer_name:
+                    summary += "What this means: This layer shows loose stones/gravel used for drainage and stability.\n"
+                elif "Sub-base" in layer_name:
+                    summary += "What this means: This is a foundational layer that distributes loads evenly.\n"
+                elif "Base Course" in layer_name:
+                    summary += "What this means: This is the main structural layer that bears traffic loads.\n"
+                elif "Asphalt" in layer_name or "Surface" in layer_name:
+                    summary += "What this means: This is the top wearing course that vehicles travel on.\n"
+                elif "Soil" in layer_name or "Subgrade" in layer_name:
+                    summary += "What this means: This is the natural soil foundation beneath all road layers.\n"
 
         elif mode == "deep_learning":
             summary = "Deep Learning Analysis Summary\n\n"
