@@ -125,16 +125,21 @@ class AnalysisWorker(QThread):
                     temp_path.parent.mkdir(exist_ok=True)
                     cv2.imwrite(str(temp_path), self.image)
                     
-                    # Use VLM parameters from GUI (Bug 3-5 fix)
+                    # Get VLM parameters from GUI
                     analysis_type = self.params.get("vlm_analysis_type", "Layer ID")
                     temperature = self.params.get("vlm_temperature", 0.3)
                     
-                    # Choose analysis method based on type
+                    # Choose analysis method and pass temperature
                     if analysis_type == "Detailed":
-                        vlm_result = analyzer.get_detailed_analysis(str(temp_path))
-                    else:
-                        # For Layer ID or Comparison, use standard analysis
-                        vlm_result = analyzer.analyze_road_layer(str(temp_path))
+                        vlm_result = analyzer.get_detailed_analysis(str(temp_path), temperature=temperature)
+                    elif analysis_type == "Quick Scan":
+                        # Quick scan: simple prompt, higher temperature for speed
+                        quick_prompt = """Quickly identify the road layer in this image. 
+                        Just tell me: Layer number (1-5), Layer name, and Confidence (%).
+                        Keep response very brief."""
+                        vlm_result = analyzer.analyze_road_layer(str(temp_path), custom_prompt=quick_prompt, temperature=min(temperature + 0.2, 1.0))
+                    else:  # Layer ID - standard analysis
+                        vlm_result = analyzer.analyze_road_layer(str(temp_path), temperature=temperature)
                     
                     # Add analysis type to result for display
                     vlm_result['analysis_type'] = analysis_type
@@ -146,7 +151,7 @@ class AnalysisWorker(QThread):
 
                     result["classification"] = vlm_result
 
-                    # Create INTERESTING VLM visualization - overlay on original image
+                    # Create ENHANCED VLM visualization with ROAD LAYER HIGHLIGHTING
                     h, w = self.image.shape[:2]
                     layer_num = vlm_result.get("layer_number", 1)
                     confidence = vlm_result.get("confidence", 0.5)
@@ -156,62 +161,81 @@ class AnalysisWorker(QThread):
                     from src.config import ROAD_LAYERS, LAYER_COLORS_RGB
                     layer_color = LAYER_COLORS_RGB.get(layer_num, (128, 128, 128))
                     
-                    # Create color overlay on original image
-                    overlay = self.image.copy()
-                    color_layer = np.zeros_like(self.image)
-                    color_layer[:] = layer_color[::-1]  # RGB to BGR
+                    # Start with original image
+                    blended = self.image.copy()
                     
-                    # Blend original with layer color (30% color tint)
-                    alpha = 0.3
-                    blended = cv2.addWeighted(overlay, 1 - alpha, color_layer, alpha, 0)
-                    
-                    # Add edge detection for visual interest
+                    # ===== EDGE DETECTION + MUTED/SHARP EFFECT =====
                     gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
                     edges = cv2.Canny(gray, 50, 150)
-                    edges_colored = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
                     
-                    # Highlight edges in layer color
-                    edge_mask = edges > 0
-                    blended[edge_mask] = [min(255, c + 50) for c in layer_color[::-1]]
+                    # Create slightly desaturated look (muted colors)
+                    gray_3ch = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                    blended = cv2.addWeighted(self.image, 0.7, gray_3ch, 0.3, 0)  # 30% gray blend
                     
-                    # Add text overlay with layer info
+                    # Apply MILD sharpening kernel
+                    sharpen_kernel = np.array([[0, -0.5, 0],
+                                               [-0.5,  3, -0.5],
+                                               [0, -0.5, 0]])
+                    blended = cv2.filter2D(blended, -1, sharpen_kernel)
+                    
+                    # Draw edges in dark gray for definition
+                    blended[edges > 0] = [60, 60, 60]  # Dark gray edges
+                    
+                    # ===== BOUNDING BOX FRAME =====
+                    box_color = (0, 255, 0)  # Bright Green
+                    box_thickness = 4
+                    margin = 8  # Inset from edges
+                    
+                    # Draw main bounding box
+                    cv2.rectangle(blended, (margin, margin), (w - margin, h - margin), box_color, box_thickness)
+                    
+                    # Add corner accent marks (thicker, longer lines at corners)
+                    corner_len = min(60, min(h, w) // 6)
+                    accent_thickness = 6
+                    
+                    # Top-left corner
+                    cv2.line(blended, (margin, margin), (margin + corner_len, margin), box_color, accent_thickness)
+                    cv2.line(blended, (margin, margin), (margin, margin + corner_len), box_color, accent_thickness)
+                    # Top-right corner
+                    cv2.line(blended, (w - margin, margin), (w - margin - corner_len, margin), box_color, accent_thickness)
+                    cv2.line(blended, (w - margin, margin), (w - margin, margin + corner_len), box_color, accent_thickness)
+                    # Bottom-left corner
+                    cv2.line(blended, (margin, h - margin), (margin + corner_len, h - margin), box_color, accent_thickness)
+                    cv2.line(blended, (margin, h - margin), (margin, h - margin - corner_len), box_color, accent_thickness)
+                    # Bottom-right corner
+                    cv2.line(blended, (w - margin, h - margin), (w - margin - corner_len, h - margin), box_color, accent_thickness)
+                    cv2.line(blended, (w - margin, h - margin), (w - margin, h - margin - corner_len), box_color, accent_thickness)
+                    
+                    # ===== INFO BANNER AT TOP =====
                     font = cv2.FONT_HERSHEY_SIMPLEX
                     font_scale = max(0.6, min(h, w) / 500)
                     thickness = max(1, int(font_scale * 2))
                     
-                    # Draw semi-transparent banner at top
                     banner_height = int(h * 0.12)
-                    cv2.rectangle(blended, (0, 0), (w, banner_height), (0, 0, 0), -1)
-                    cv2.addWeighted(blended[0:banner_height, :], 0.7, 
-                                   self.image[0:banner_height, :], 0.3, 0, 
-                                   blended[0:banner_height, :])
+                    banner_overlay = blended.copy()
+                    cv2.rectangle(banner_overlay, (0, 0), (w, banner_height), (0, 0, 0), -1)
+                    blended = cv2.addWeighted(blended, 0.4, banner_overlay, 0.6, 0)
                     
-                    # Add layer name text
+                    # Layer name text with shadow
                     text = f"Layer {layer_num}: {layer_name}"
-                    cv2.putText(blended, text, (10, int(banner_height * 0.45)), 
+                    cv2.putText(blended, text, (12, int(banner_height * 0.50)), 
+                               font, font_scale, (0, 0, 0), thickness + 2)
+                    cv2.putText(blended, text, (10, int(banner_height * 0.48)), 
                                font, font_scale, (255, 255, 255), thickness)
                     
-                    # Add confidence bar
+                    # Confidence text
                     conf_text = f"Confidence: {confidence:.0%}"
                     cv2.putText(blended, conf_text, (10, int(banner_height * 0.85)), 
                                font, font_scale * 0.7, (200, 200, 200), max(1, thickness - 1))
                     
-                    # Draw confidence bar
-                    bar_width = int(w * 0.3)
+                    # Confidence bar
+                    bar_width = int(w * 0.25)
                     bar_x = w - bar_width - 20
-                    bar_y = int(banner_height * 0.6)
-                    bar_height = 12
-                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (100, 100, 100), -1)
-                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + int(bar_width * confidence), bar_y + bar_height), 
-                                 layer_color[::-1], -1)
-                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (255, 255, 255), 1)
-                    
-                    # Add corner decorations
-                    corner_size = min(40, min(h, w) // 10)
-                    cv2.line(blended, (5, banner_height + 10), (5, banner_height + 10 + corner_size), layer_color[::-1], 3)
-                    cv2.line(blended, (5, banner_height + 10), (5 + corner_size, banner_height + 10), layer_color[::-1], 3)
-                    cv2.line(blended, (w-5, h-10), (w-5, h-10-corner_size), layer_color[::-1], 3)
-                    cv2.line(blended, (w-5, h-10), (w-5-corner_size, h-10), layer_color[::-1], 3)
+                    bar_y = int(banner_height * 0.40)
+                    bar_h = 16
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_h), (60, 60, 60), -1)
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + int(bar_width * confidence), bar_y + bar_h), box_color, -1)
+                    cv2.rectangle(blended, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_h), (255, 255, 255), 1)
                     
                     # Store the enhanced visualization
                     result["vlm_visualization"] = blended
@@ -719,7 +743,7 @@ class MainWindow(QMainWindow):
         # Analysis type
         vlm_layout.addWidget(QLabel("Analysis Type:"), 1, 0)
         self.vlm_type_combo = QComboBox()
-        self.vlm_type_combo.addItems(["Layer ID", "Detailed", "Comparison"])
+        self.vlm_type_combo.addItems(["Layer ID", "Detailed", "Quick Scan"])
         vlm_layout.addWidget(self.vlm_type_combo, 1, 1)
         
         # Temperature

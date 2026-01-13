@@ -133,7 +133,8 @@ class VLMAnalyzer:
     def analyze_road_layer(
         self,
         image_path: Union[str, Path],
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        temperature: Optional[float] = None
     ) -> Dict:
         """
         Analyze image to identify road construction layer.
@@ -141,6 +142,7 @@ class VLMAnalyzer:
         Args:
             image_path: Path to image file
             custom_prompt: Optional custom analysis prompt
+            temperature: Optional temperature for API call
             
         Returns:
             Analysis result dictionary
@@ -172,8 +174,8 @@ class VLMAnalyzer:
             }
         ]
         
-        # Make request
-        response = self._make_request(messages)
+        # Make request with temperature
+        response = self._make_request(messages, temperature=temperature)
         
         if "error" in response:
             return {
@@ -319,13 +321,15 @@ class VLMAnalyzer:
     
     def get_detailed_analysis(
         self,
-        image_path: Union[str, Path]
+        image_path: Union[str, Path],
+        temperature: Optional[float] = None
     ) -> Dict:
         """
         Get comprehensive analysis of road layer image.
         
         Args:
             image_path: Path to image file
+            temperature: Optional temperature for API call
             
         Returns:
             Detailed analysis result
@@ -364,7 +368,7 @@ class VLMAnalyzer:
         5. Surface Course (premix asphalt) - Smooth asphalt finish
         """
         
-        return self.analyze_road_layer(image_path, custom_prompt=detailed_prompt)
+        return self.analyze_road_layer(image_path, custom_prompt=detailed_prompt, temperature=temperature)
     
     def compare_layers(
         self,
