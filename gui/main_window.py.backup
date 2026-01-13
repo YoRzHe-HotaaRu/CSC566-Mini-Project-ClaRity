@@ -94,21 +94,13 @@ class AnalysisWorker(QThread):
                 self.progress.emit(50, "Running DeepLabv3+ inference...")
                 try:
                     from src.deep_learning import DeepLabSegmenter
-                    
-                    # Use parameters from GUI (Bug 3-5 fix)
-                    backbone = self.params.get("dl_backbone", "ResNet-101").lower().replace("-", "")
-                    use_cuda = "cuda" in self.params.get("dl_device", "CPU").lower()
-                    
-                    segmenter = DeepLabSegmenter(
-                        encoder_name=backbone,
-                        use_cuda=use_cuda
-                    )
+                    segmenter = DeepLabSegmenter()
                     labels = segmenter.segment(self.image)
                     result["labels"] = labels
                     result["classification"] = {
-                        "layer_name": "Deep Learning Segmentation",
+                        "layer_name": "Deep Learning",
                         "confidence": 0.85,
-                        "method": f"DeepLabv3+ ({backbone}, {'CUDA' if use_cuda else 'CPU'})"
+                        "method": "DeepLabv3+"
                     }
                 except Exception as e:
                     self.error.emit(f"Deep learning error: {str(e)}")
@@ -125,48 +117,9 @@ class AnalysisWorker(QThread):
                     temp_path.parent.mkdir(exist_ok=True)
                     cv2.imwrite(str(temp_path), self.image)
                     
-                    # Use VLM parameters from GUI (Bug 3-5 fix)
-                    analysis_type = self.params.get("vlm_analysis_type", "Layer ID")
-                    temperature = self.params.get("vlm_temperature", 0.3)
-                    
-                    # Choose analysis method based on type
-                    if analysis_type == "Detailed":
-                        vlm_result = analyzer.get_detailed_analysis(str(temp_path))
-                    else:
-                        # For Layer ID or Comparison, use standard analysis
-                        vlm_result = analyzer.analyze_road_layer(str(temp_path))
-                    
-                    # Add analysis type to result for display
-                    vlm_result['analysis_type'] = analysis_type
-                    vlm_result['temperature_used'] = temperature
-
-                    # Ensure method field is populated
-                    if 'method' not in vlm_result or vlm_result.get('method') == 'N/A':
-                        vlm_result['method'] = f'VLM Analysis (GLM-4.6V, {analysis_type})'
-
+                    vlm_result = analyzer.analyze_road_layer(str(temp_path))
                     result["classification"] = vlm_result
-
-                    # Create smart VLM visualization
-                    h, w = self.image.shape[:2]
-                    layer_num = vlm_result.get("layer_number", 1)
-                    
-                    # Create visualization with detected layer
-                    labels = np.ones((h, w), dtype=np.uint8) * layer_num
-                    
-                    # Add border to indicate image boundary
-                    border_width = min(h, w) // 20
-                    labels[:border_width, :] = 0
-                    labels[-border_width:, :] = 0
-                    labels[:, :border_width] = 0
-                    labels[:, -border_width:] = 0
-                    
-                    # Add confidence-based overlay
-                    confidence = vlm_result.get("confidence", 0.5)
-                    if confidence < 0.7:
-                        noise_mask = np.random.random((h, w)) > confidence
-                        labels[noise_mask] = 0
-                    
-                    result["labels"] = labels
+                    result["labels"] = np.ones(self.image.shape[:2], dtype=np.uint8) * vlm_result.get("layer_number", 1)
                 except Exception as e:
                     self.error.emit(f"VLM analysis error: {str(e)}")
                     return
@@ -210,10 +163,7 @@ class AnalysisWorker(QThread):
 
 
 class ImageLabel(QLabel):
-    """Custom label for displaying images with aspect ratio preservation and drag-drop support."""
-    
-    # Signal emitted when image is dropped
-    imageDropped = pyqtSignal(str)
+    """Custom label for displaying images with aspect ratio preservation."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -228,55 +178,6 @@ class ImageLabel(QLabel):
         """)
         self.setText("Drop image here\nor click Load Image")
         self._pixmap = None
-        
-        # Enable drag-drop
-        self.setAcceptDrops(True)
-    
-    def dragEnterEvent(self, event):
-        """Handle drag enter - accept image files."""
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if urls:
-                file_path = urls[0].toLocalFile().lower()
-                if file_path.endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')):
-                    event.acceptProposedAction()
-                    self.setStyleSheet("""
-                        QLabel {
-                            background-color: #3a4a3a;
-                            border: 2px dashed #4CAF50;
-                            border-radius: 8px;
-                        }
-                    """)
-                    return
-        event.ignore()
-    
-    def dragLeaveEvent(self, event):
-        """Handle drag leave - reset style."""
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #2a2a2a;
-                border: 2px dashed #555;
-                border-radius: 8px;
-            }
-        """)
-    
-    def dropEvent(self, event):
-        """Handle drop - load image file."""
-        urls = event.mimeData().urls()
-        if urls:
-            file_path = urls[0].toLocalFile()
-            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')):
-                self.imageDropped.emit(file_path)
-                event.acceptProposedAction()
-        
-        # Reset style
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #2a2a2a;
-                border: 2px dashed #555;
-                border-radius: 8px;
-            }
-        """)
     
     def setImage(self, image: np.ndarray):
         """Set image from numpy array."""
@@ -407,8 +308,6 @@ class MainWindow(QMainWindow):
         original_group = QGroupBox("Original Image")
         original_layout = QVBoxLayout(original_group)
         self.original_label = ImageLabel()
-        # Connect drag-drop signal (Bug 2 fix)
-        self.original_label.imageDropped.connect(self.load_image_from_path)
         original_layout.addWidget(self.original_label)
         images_layout.addWidget(original_group)
         
@@ -452,15 +351,12 @@ class MainWindow(QMainWindow):
                 padding: 2px 8px;
                 font-size: 10px;
             ''')
+            legend_item.setVisible(False)  # Initially hidden
             self.legend_items[layer_num] = legend_item
             self.legend_layout.addWidget(legend_item)
         
         self.legend_layout.addStretch()
-        legend_layout.addWidget(self.legend_widget)
-        
-        # Initially hide legend widget and show placeholder (Bug 1 fix)
-        self.legend_widget.setVisible(False)
-        self.legend_placeholder.setVisible(True)
+        legend_layout.addWidget(self.legend_widget)  # Add legend widget to main layout
         layout.addWidget(self.legend_group)
         return panel
     def create_control_panel(self) -> QWidget:
@@ -540,21 +436,6 @@ class MainWindow(QMainWindow):
         results_layout.addWidget(self.results_text)
         
         layout.addWidget(results_group)
-        
-        # Summary panel (NEW)
-        summary_group = QGroupBox("📋 Summary")
-        summary_layout = QVBoxLayout(summary_group)
-        
-        self.summary_text = QTextEdit()
-        self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(150)
-        self.summary_text.setPlaceholderText("Plain-English summary will appear here...")
-        self.summary_text.setStyleSheet(
-            "QTextEdit { background-color: #1a1a2e; border: 2px solid #4a4a6a; border-radius: 8px; padding: 10px; font-size: 11px; line-height: 1.4; }"
-        )
-        summary_layout.addWidget(self.summary_text)
-        
-        layout.addWidget(summary_group)
         
         layout.addStretch()
         
@@ -955,26 +836,6 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Error", "Failed to load image")
     
-    def load_image_from_path(self, file_path: str):
-        """Load image from file path (for drag-drop support - Bug 2 fix)."""
-        if file_path:
-            self.image = cv2.imread(file_path)
-            if self.image is not None:
-                self.original_label.setImage(self.image)
-                self.analyze_btn.setEnabled(True)
-                self.status_bar.showMessage(f"Loaded (dropped): {Path(file_path).name}")
-                
-                # Show image info
-                info = get_image_info(self.image)
-                self.results_text.setText(
-                    f"Image loaded:\n"
-                    f"  Size: {info['width']} x {info['height']}\n"
-                    f"  Channels: {info['channels']}\n"
-                    f"  Type: {info['dtype']}"
-                )
-            else:
-                QMessageBox.warning(self, "Error", "Failed to load dropped image")
-    
     def get_current_mode(self) -> str:
         """Get currently selected analysis mode."""
         if self.mode_classical.isChecked():
@@ -987,9 +848,8 @@ class MainWindow(QMainWindow):
             return "hybrid"
     
     def get_parameters(self) -> dict:
-        """Get current parameter values for ALL analysis modes."""
-        params = {
-            # Classical mode parameters
+        """Get current parameter values."""
+        return {
             "noise_filter": self.noise_combo.currentText(),
             "kernel_size": self.kernel_spin.value(),
             "contrast_method": self.contrast_combo.currentText(),
@@ -1000,32 +860,8 @@ class MainWindow(QMainWindow):
             "segmentation_method": self.seg_combo.currentText(),
             "n_clusters": self.clusters_spin.value(),
             "use_morphology": self.morph_check.isChecked(),
-            "fill_holes": self.fill_check.isChecked(),
-            
-            # VLM mode parameters (Bug 3-5 fix)
-            "vlm_analysis_type": self.vlm_type_combo.currentText(),
-            "vlm_temperature": self.temp_spin.value(),
-            "vlm_include_layer": self.vlm_layer_check.isChecked(),
-            "vlm_include_confidence": self.vlm_conf_check.isChecked(),
-            "vlm_include_material": self.vlm_material_check.isChecked(),
-            "vlm_include_texture": self.vlm_texture_check.isChecked(),
-            "vlm_include_recommendations": self.vlm_recom_check.isChecked(),
-            
-            # Deep Learning mode parameters
-            "dl_backbone": self.backbone_combo.currentText(),
-            "dl_pretrained": self.pretrained_check.isChecked(),
-            "dl_device": self.device_combo.currentText(),
-            "dl_confidence_threshold": self.confidence_spin.value(),
-            "dl_batch_size": self.batch_spin.value(),
-            "dl_resolution": self.resolution_combo.currentText(),
-            
-            # Hybrid mode parameters
-            "hybrid_primary_method": self.primary_combo.currentText(),
-            "hybrid_vlm_validation": self.ai_validation_check.isChecked(),
-            "classical_weight": self.classical_weight_spin.value() / 100.0,
-            "hybrid_conflict_rule": self.conflict_combo.currentText()
+            "fill_holes": self.fill_check.isChecked()
         }
-        return params
     
     def run_analysis(self):
         """Run analysis on loaded image."""
@@ -1037,7 +873,6 @@ class MainWindow(QMainWindow):
         self.analyze_btn.setEnabled(False)
         
         mode = self.get_current_mode()
-        self.mode = mode  # Store mode for summary generation
         params = self.get_parameters()
         
         self.worker = AnalysisWorker(self.image.copy(), mode, params)
@@ -1071,59 +906,23 @@ class MainWindow(QMainWindow):
         features = result.get("features", {})
         
         text = "═══ ANALYSIS RESULTS ═══\n\n"
+        text += f"Detected Layer: {classification.get('layer_name', 'N/A')}\n"
+        text += f"Confidence: {classification.get('confidence', 0):.1%}\n"
+        text += f"Material: {classification.get('material', 'N/A')}\n"
+        text += f"Method: {classification.get('method', 'N/A')}\n\n"
         
-        # Layer identification
-        layer_name = classification.get('layer_name', classification.get('full_name', 'N/A'))
-        confidence = classification.get('confidence', 0)
-        text += f"🔍 Detected Layer: {layer_name}\n"
-        text += f"📊 Confidence: {confidence:.1%}\n"
-        
-        # Material info
-        material = classification.get('material', 'N/A')
-        if material and material != 'N/A':
-            text += f"🧱 Material: {material}\n"
-        
-        # Method used
-        method = classification.get('method', 'N/A')
-        if method == 'N/A':
-            method = "VLM Analysis (GLM-4.6V)"
-        text += f"⚙️  Method: {method}\n"
-        
-        # Layer number
-        layer_num = classification.get('layer_number')
-        if layer_num:
-            text += f"🔢 Layer Number: {layer_num}\n"
-        
-        # VLM-specific fields
-        texture = classification.get('texture_description')
-        if texture and texture != 'N/A':
-            text += f"\n🎨 Texture Description:\n   {texture}\n"
-        
-        reasoning = classification.get('reasoning')
-        if reasoning and reasoning != 'N/A':
-            text += f"\n🧠 Analysis Reasoning:\n   {reasoning}\n"
-        
-        notes = classification.get('additional_notes')
-        if notes and notes != 'N/A':
-            text += f"\n📝 Additional Notes:\n   {notes}\n"
-        
-        # GLCM features (only for classical/hybrid modes)
-        if "glcm" in features and self.mode in ["classical", "hybrid"]:
-            text += "\n─── Texture Features ───\n"
+        if "glcm" in features:
             glcm = features["glcm"]
+            text += "─── GLCM Features ───\n"
             text += f"Contrast:    {glcm.get('contrast', 0):.4f}\n"
             text += f"Energy:      {glcm.get('energy', 0):.4f}\n"
             text += f"Homogeneity: {glcm.get('homogeneity', 0):.4f}\n"
             text += f"Correlation: {glcm.get('correlation', 0):.4f}\n"
         
         self.results_text.setText(text)
-        
-        # Generate plain-English summary
-        self.generate_summary(result, classification)
-        
         self.status_bar.showMessage("Analysis complete!")    
     def update_legend(self, labels):
-        """Update legend to show all layers, highlighting detected ones (Bug 6 fix)."""
+        """Update legend to show only detected layers."""
         import numpy as np
         
         # Hide placeholder and show legend widget
@@ -1134,109 +933,15 @@ class MainWindow(QMainWindow):
         unique_labels = np.unique(labels)
         detected_layers = [int(l) for l in unique_labels if l > 0]
         
-        # Always show ALL 5 layers but highlight detected ones
+        # Show all layers if nothing detected, otherwise show only detected
+        show_all = len(detected_layers) == 0
+        
         for layer_num in range(1, 6):
             if layer_num in self.legend_items:
-                layer = ROAD_LAYERS[layer_num]
-                color = layer["hex_color"]
-                
-                self.legend_items[layer_num].setVisible(True)
-                
-                if layer_num in detected_layers:
-                    # Detected layer: bright, bold, with checkmark
-                    self.legend_items[layer_num].setStyleSheet(f'''
-                        color: {color}; 
-                        font-weight: bold; 
-                        padding: 2px 8px;
-                        font-size: 11px;
-                        background-color: rgba(255, 255, 255, 0.1);
-                        border-radius: 4px;
-                    ''')
-                    self.legend_items[layer_num].setText(f"✓ {layer['name']}")
+                if show_all or layer_num in detected_layers:
+                    self.legend_items[layer_num].setVisible(True)
                 else:
-                    # Non-detected layer: dimmed, not bold
-                    self.legend_items[layer_num].setStyleSheet(f'''
-                        color: #666; 
-                        font-weight: normal; 
-                        padding: 2px 8px;
-                        font-size: 9px;
-                    ''')
-                    self.legend_items[layer_num].setText(f"■ {layer['name']}")
-
-    def generate_summary(self, result: dict, classification: dict):
-        """Generate plain-English summary for non-technical users."""
-        mode = self.mode if hasattr(self, 'mode') else self.get_current_mode()
-
-        layer_name = classification.get('layer_name', classification.get('full_name', 'Unknown'))
-        confidence = classification.get('confidence', 0)
-        material = classification.get('material', '')
-
-        # Build summary based on mode
-        if mode == "vlm":
-            summary = "VLM Analysis Summary\n\n"
-            summary += f"The AI vision model analyzed your image and identified it as:\n\n"
-            summary += f"{layer_name}\n\n"
-
-            # Confidence explanation
-            if confidence >= 0.8:
-                summary += f"The model is very confident ({confidence:.0%}) about this identification.\n\n"
-            elif confidence >= 0.6:
-                summary += f"The model is moderately confident ({confidence:.0%}) about this identification.\n\n"
-            else:
-                summary += f"The model has low confidence ({confidence:.0%}) - consider using another analysis mode.\n\n"
-
-            # Material explanation
-            if material and material != 'N/A':
-                summary += f"Material: {material}\n\n"
-
-            # Simple explanation
-            if "Aggregate" in layer_name:
-                summary += "What this means: This layer shows loose stones/gravel used for drainage and stability.\n"
-            elif "Sub-base" in layer_name:
-                summary += "What this means: This is a foundational layer that distributes loads evenly.\n"
-            elif "Base Course" in layer_name:
-                summary += "What this means: This is the main structural layer that bears traffic loads.\n"
-            elif "Asphalt" in layer_name or "Surface" in layer_name:
-                summary += "What this means: This is the top wearing course that vehicles travel on.\n"
-            elif "Soil" in layer_name or "Subgrade" in layer_name:
-                summary += "What this means: This is the natural soil foundation beneath all road layers.\n"
-
-        elif mode == "deep_learning":
-            summary = "Deep Learning Analysis Summary\n\n"
-            summary += f"The neural network (DeepLabv3+) segmented your image.\n\n"
-            summary += f"Primary Layer: {layer_name}\n\n"
-            summary += f"This mode uses advanced AI trained on thousands of road images to identify layers.\n"
-            summary += f"Great for complex images with mixed materials.\n"
-
-        elif mode == "classical":
-            summary = "Classical Analysis Summary\n\n"
-            summary += f"Traditional image processing techniques were used:\n\n"
-            summary += f"Identified Layer: {layer_name}\n"
-            summary += f"Confidence: {confidence:.0%}\n\n"
-
-            if material:
-                summary += f"Material Type: {material}\n\n"
-
-            summary += "How it worked:\n"
-            summary += "- Extracted texture features (GLCM, LBP)\n"
-            summary += "- Applied K-means clustering segmentation\n"
-            summary += "- Used heuristic rules to classify layers\n\n"
-            summary += "This mode is fast and works well for clear, distinct textures.\n"
-
-        elif mode == "hybrid":
-            summary = "Hybrid Analysis Summary\n\n"
-            summary += f"Combined classical and AI methods for best accuracy:\n\n"
-            summary += f"Final Result: {layer_name}\n"
-            summary += f"Combined Confidence: {confidence:.0%}\n\n"
-            summary += "Best of both worlds:\n"
-            summary += "- Classical: Fast texture analysis\n"
-            summary += "- VLM: Smart AI understanding\n"
-            summary += "Most accurate for challenging images.\n"
-
-        else:
-            summary = f"Analysis complete: {layer_name} ({confidence:.0%} confidence)"
-
-        self.summary_text.setText(summary)
+                    self.legend_items[layer_num].setVisible(False)
 
     def analysis_error(self, error: str):
         """Handle analysis error."""
