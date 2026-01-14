@@ -321,35 +321,152 @@ class AnalysisWorker(QThread):
                     return
             
             elif self.mode == "hybrid":
-                # Combine classical and VLM
-                self.progress.emit(30, "Running classical analysis...")
-                features = extract_all_texture_features(preprocessed)
-                labels, _ = kmeans_segment(self.image, n_clusters=5)
+                # ===== HYBRID MODE: Classical + AI Validation =====
                 
-                self.progress.emit(70, "Running VLM analysis...")
-                try:
-                    from src.vlm_analyzer import VLMAnalyzer
-                    analyzer = VLMAnalyzer()
-                    temp_path = Path(__file__).parent.parent / "results" / "temp_analysis.jpg"
-                    temp_path.parent.mkdir(exist_ok=True)
-                    cv2.imwrite(str(temp_path), self.image)
-                    vlm_result = analyzer.analyze_road_layer(str(temp_path))
-                    
-                    classical = get_layer_by_texture_heuristic(features)
-                    
-                    # Combine results (weighted average)
-                    classical_weight = self.params.get("classical_weight", 0.7)
-                    result["classification"] = {
-                        "layer_name": vlm_result.get("layer_name") or classical["layer_name"],
-                        "confidence": classical_weight * classical["confidence"] + 
-                                     (1 - classical_weight) * vlm_result.get("confidence", 0.5),
-                        "method": "Hybrid"
-                    }
-                except:
-                    result["classification"] = get_layer_by_texture_heuristic(features)
+                # Step 1: Run full Classical analysis (inherits ALL Classical settings)
+                self.progress.emit(20, "Running classical analysis...")
+                
+                # Texture features with selected options
+                features = extract_all_texture_features(
+                    preprocessed,
+                    use_glcm=self.params.get("use_glcm", True),
+                    use_lbp=self.params.get("use_lbp", True),
+                    use_gabor=self.params.get("use_gabor", False)
+                )
+                result["features"] = features
+                
+                # Segmentation with selected method (same as Classical)
+                self.progress.emit(35, "Segmenting image...")
+                n_clusters = self.params.get("n_clusters", 5)
+                seg_method = self.params.get("segmentation_method", "K-Means")
+                
+                from src.segmentation import kmeans_segment, slic_segment, watershed_segment
+                
+                if seg_method == "SLIC Superpixels":
+                    superpixel_labels = slic_segment(self.image, n_segments=n_clusters * 50, compactness=10.0)
+                    unique_sp = np.unique(superpixel_labels)
+                    sp_colors = []
+                    for sp in unique_sp:
+                        mask = superpixel_labels == sp
+                        mean_color = self.image[mask].mean(axis=0)
+                        sp_colors.append(mean_color)
+                    sp_colors = np.array(sp_colors, dtype=np.float32)
+                    from sklearn.cluster import KMeans
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    sp_cluster_labels = kmeans.fit_predict(sp_colors)
+                    labels = np.zeros_like(superpixel_labels)
+                    for idx, sp in enumerate(unique_sp):
+                        labels[superpixel_labels == sp] = sp_cluster_labels[idx]
+                elif seg_method == "Watershed":
+                    gray_img = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY) if len(self.image.shape) == 3 else self.image
+                    labels = watershed_segment(gray_img)
+                    unique = np.unique(labels)
+                    if len(unique) > n_clusters:
+                        labels = (labels % n_clusters)
+                else:  # K-Means (default)
+                    labels, _ = kmeans_segment(self.image, n_clusters=n_clusters)
+                
+                result["segmentation_method"] = seg_method
+                
+                # Morphology + Fill holes (same as Classical)
+                self.progress.emit(45, "Refining segmentation...")
+                use_morphology = self.params.get("use_morphology", True)
+                fill_holes = self.params.get("fill_holes", True)
+                
+                if use_morphology or fill_holes:
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                    cleaned_labels = np.zeros_like(labels)
+                    for i in range(n_clusters):
+                        mask = (labels == i).astype(np.uint8)
+                        if use_morphology:
+                            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+                            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+                        if fill_holes:
+                            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            mask_filled = np.zeros_like(mask)
+                            cv2.drawContours(mask_filled, contours, -1, 1, -1)
+                            mask = mask_filled
+                        cleaned_labels[mask == 1] = i
+                    labels = cleaned_labels
                 
                 result["labels"] = labels + 1
-                result["features"] = features
+                result["morphology_applied"] = use_morphology
+                result["fill_holes_applied"] = fill_holes
+                
+                # Classical classification
+                classical_result = get_layer_by_texture_heuristic(features)
+                classical_result["method"] = f"Classical ({seg_method})"
+                
+                # Step 2: VLM Cross-Check (if enabled)
+                vlm_result = None
+                vlm_enabled = self.params.get("hybrid_vlm_validation", True)
+                
+                if vlm_enabled:
+                    self.progress.emit(60, "Running VLM cross-check...")
+                    try:
+                        from src.vlm_analyzer import VLMAnalyzer
+                        analyzer = VLMAnalyzer()
+                        temp_path = Path(__file__).parent.parent / "results" / "temp_analysis.jpg"
+                        temp_path.parent.mkdir(exist_ok=True)
+                        cv2.imwrite(str(temp_path), self.image)
+                        vlm_result = analyzer.analyze_road_layer(str(temp_path))
+                        vlm_result["method"] = "VLM (GLM-4.6V)"
+                    except Exception as e:
+                        # VLM failed, continue with Classical only
+                        vlm_result = None
+                        result["vlm_error"] = str(e)
+                
+                # Step 3: Combine results based on Conflict Rule
+                self.progress.emit(85, "Combining results...")
+                conflict_rule = self.params.get("hybrid_conflict_rule", "Higher Confidence Wins")
+                classical_weight = self.params.get("classical_weight", 0.7)
+                
+                if vlm_result is None:
+                    # VLM disabled or failed - use Classical only
+                    final_result = classical_result.copy()
+                    final_result["method"] = f"Hybrid (Classical only - VLM {'disabled' if not vlm_enabled else 'failed'})"
+                elif conflict_rule == "Higher Confidence Wins":
+                    vlm_conf = vlm_result.get("confidence", 0)
+                    classical_conf = classical_result.get("confidence", 0)
+                    if vlm_conf > classical_conf:
+                        final_result = vlm_result.copy()
+                        final_result["method"] = f"Hybrid (VLM won: {vlm_conf:.0%} > {classical_conf:.0%})"
+                    else:
+                        final_result = classical_result.copy()
+                        final_result["method"] = f"Hybrid (Classical won: {classical_conf:.0%} >= {vlm_conf:.0%})"
+                elif conflict_rule == "Classical Priority":
+                    vlm_conf = vlm_result.get("confidence", 0)
+                    if vlm_conf > 0.9:
+                        final_result = vlm_result.copy()
+                        final_result["method"] = f"Hybrid (VLM override: {vlm_conf:.0%} > 90%)"
+                    else:
+                        final_result = classical_result.copy()
+                        final_result["method"] = "Hybrid (Classical priority)"
+                elif conflict_rule == "VLM Priority":
+                    final_result = vlm_result.copy()
+                    final_result["method"] = "Hybrid (VLM priority)"
+                else:  # Weighted Average or default
+                    # Blend confidences
+                    vlm_conf = vlm_result.get("confidence", 0)
+                    classical_conf = classical_result.get("confidence", 0)
+                    blended_conf = classical_weight * classical_conf + (1 - classical_weight) * vlm_conf
+                    
+                    # Use layer from PRIMARY weight source (not raw confidence!)
+                    ai_weight = 1 - classical_weight
+                    if classical_weight >= ai_weight:
+                        # Classical has more weight, use Classical's layer
+                        final_result = classical_result.copy()
+                    else:
+                        # AI has more weight, use VLM's layer
+                        final_result = vlm_result.copy()
+                    
+                    final_result["confidence"] = blended_conf
+                    final_result["method"] = f"Hybrid (Weighted: {classical_weight:.0%} Classical + {ai_weight:.0%} AI)"
+                
+                # Store both results for reference
+                result["classical_result"] = classical_result
+                result["vlm_result"] = vlm_result
+                result["classification"] = final_result
             
             self.progress.emit(100, "Analysis complete!")
             self.finished.emit(result)
@@ -864,49 +981,134 @@ class MainWindow(QMainWindow):
         
         # Hybrid Settings group
         hybrid_group = QGroupBox("Hybrid Settings")
-        hybrid_layout = QGridLayout(hybrid_group)
+        hybrid_layout = QVBoxLayout(hybrid_group)
         
-        # Primary method
-        hybrid_layout.addWidget(QLabel("Primary Method:"), 0, 0)
-        self.primary_combo = QComboBox()
-        self.primary_combo.addItems(["Classical", "Deep Learning", "VLM"])
-        hybrid_layout.addWidget(self.primary_combo, 0, 1)
-        
-        # AI Validation
+        # VLM Cross-Check toggle
         self.ai_validation_check = QCheckBox("Enable VLM Cross-Check")
         self.ai_validation_check.setChecked(True)
-        hybrid_layout.addWidget(self.ai_validation_check, 1, 0, 1, 2)
+        self.ai_validation_check.setToolTip("When enabled, VLM will validate Classical results")
+        hybrid_layout.addWidget(self.ai_validation_check)
         
-        # Weighting
-        hybrid_layout.addWidget(QLabel("Classical Weight:"), 2, 0)
-        self.classical_weight_spin = QSpinBox()
+        # Separator
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.HLine)
+        line1.setStyleSheet("background-color: #555;")
+        hybrid_layout.addWidget(line1)
+        
+        # Weight Balance Slider
+        weight_label = QLabel("Weight Balance:")
+        weight_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        hybrid_layout.addWidget(weight_label)
+        
+        # Slider with Classical on left, AI on right
+        self.classical_weight_spin = QSlider(Qt.Horizontal)
         self.classical_weight_spin.setRange(0, 100)
         self.classical_weight_spin.setValue(70)
-        self.classical_weight_spin.setSuffix("%")
-        hybrid_layout.addWidget(self.classical_weight_spin, 2, 1)
+        self.classical_weight_spin.setTickPosition(QSlider.TicksBelow)
+        self.classical_weight_spin.setTickInterval(10)
+        # Two-tone gradient: Green (Classical) on left, Blue (AI) on right
+        self.classical_weight_spin.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #444;
+                height: 10px;
+                border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4CAF50, stop:1 #2196F3);
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                border: 2px solid #888;
+                width: 18px;
+                margin: -5px 0;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #f0f0f0;
+                border: 2px solid #4CAF50;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4CAF50;
+                border-radius: 5px;
+            }
+            QSlider::add-page:horizontal {
+                background: #2196F3;
+                border-radius: 5px;
+            }
+        """)
+        hybrid_layout.addWidget(self.classical_weight_spin)
         
-        hybrid_layout.addWidget(QLabel("AI Weight:"), 3, 0)
-        ai_label = QLabel("30%")
-        hybrid_layout.addWidget(ai_label, 3, 1)
-        self.ai_weight_label = ai_label
+        # Dynamic percentage labels below slider
+        weight_info_layout = QHBoxLayout()
+        self.classical_pct_label = QLabel("Classical: 70%")
+        self.classical_pct_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self.ai_pct_label = QLabel("AI: 30%")
+        self.ai_pct_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+        self.ai_pct_label.setAlignment(Qt.AlignRight)
+        weight_info_layout.addWidget(self.classical_pct_label)
+        weight_info_layout.addStretch()
+        weight_info_layout.addWidget(self.ai_pct_label)
+        hybrid_layout.addLayout(weight_info_layout)
         
-        # Update AI weight label when classical changes
-        self.classical_weight_spin.valueChanged.connect(
-            lambda v: ai_label.setText(f"{100-v}%")
-        )
+        # Update labels when slider changes
+        def update_weight_labels(value):
+            self.classical_pct_label.setText(f"Classical: {value}%")
+            self.ai_pct_label.setText(f"AI: {100 - value}%")
+        
+        self.classical_weight_spin.valueChanged.connect(update_weight_labels)
+        
+        # Separator
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.HLine)
+        line2.setStyleSheet("background-color: #555; margin-top: 10px;")
+        hybrid_layout.addWidget(line2)
         
         # Conflict resolution
-        hybrid_layout.addWidget(QLabel("Conflict Rule:"), 4, 0)
+        conflict_label = QLabel("Conflict Rule:")
+        conflict_label.setStyleSheet("font-weight: bold; margin-top: 5px;")
+        hybrid_layout.addWidget(conflict_label)
+        
         self.conflict_combo = QComboBox()
-        self.conflict_combo.addItems(["Higher Confidence Wins", "Primary Method Wins", "Average Confidences"])
-        hybrid_layout.addWidget(self.conflict_combo, 4, 1)
+        self.conflict_combo.addItems([
+            "Weighted Average",  # Default - first in list
+            "Higher Confidence Wins",
+            "Classical Priority", 
+            "VLM Priority"
+        ])
+        self.conflict_combo.setToolTip(
+            "Weighted Average: Blend using slider weights (default)\n"
+            "Higher Confidence: Use result with higher confidence\n"
+            "Classical Priority: Use Classical unless VLM >90%\n"
+            "VLM Priority: Always use VLM result"
+        )
+        hybrid_layout.addWidget(self.conflict_combo)
+        
+        # Enable/disable slider based on conflict rule
+        def on_conflict_rule_changed(rule):
+            is_weighted = (rule == "Weighted Average")
+            self.classical_weight_spin.setEnabled(is_weighted)
+            self.classical_pct_label.setEnabled(is_weighted)
+            self.ai_pct_label.setEnabled(is_weighted)
+            # Update styling for disabled state
+            if is_weighted:
+                self.classical_pct_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+                self.ai_pct_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+            else:
+                self.classical_pct_label.setStyleSheet("color: #666; font-weight: normal;")
+                self.ai_pct_label.setStyleSheet("color: #666; font-weight: normal;")
+        
+        self.conflict_combo.currentTextChanged.connect(on_conflict_rule_changed)
+        
+        # Hidden primary combo (for compatibility - always Classical)
+        self.primary_combo = QComboBox()
+        self.primary_combo.addItems(["Classical"])
+        self.primary_combo.setVisible(False)
         
         layout.addWidget(hybrid_group)
         
         # Info text
         info_label = QLabel(
-            "Hybrid mode combines classical texture analysis with AI validation. "
-            "Adjust weights to balance between fast classical processing and accurate AI analysis."
+            "Hybrid mode runs Classical analysis first, then validates with VLM.\n"
+            "Slide left for more Classical weight, right for more AI weight."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
@@ -1432,10 +1634,27 @@ class MainWindow(QMainWindow):
             summary += f"Combined classical and AI methods for best accuracy:\n\n"
             summary += f"Final Result: {layer_name}\n"
             summary += f"Combined Confidence: {confidence:.0%}\n\n"
-            summary += "Best of both worlds:\n"
-            summary += "- Classical: Fast texture analysis\n"
-            summary += "- VLM: Smart AI understanding\n"
-            summary += "Most accurate for challenging images.\n"
+            
+            # Show what methods were used
+            method_info = classification.get("method", "Hybrid")
+            summary += f"Decision: {method_info}\n\n"
+            
+            # Show Classical result if available
+            classical_res = result.get("classical_result", {})
+            vlm_res = result.get("vlm_result")
+            
+            summary += "Individual Results:\n"
+            if classical_res:
+                summary += f"- Classical: {classical_res.get('layer_name', 'N/A')} ({classical_res.get('confidence', 0):.0%})\n"
+            if vlm_res:
+                summary += f"- VLM (AI): {vlm_res.get('layer_name', 'N/A')} ({vlm_res.get('confidence', 0):.0%})\n"
+            elif result.get("vlm_error"):
+                summary += f"- VLM (AI): Failed - {result.get('vlm_error', 'Unknown error')}\n"
+            else:
+                summary += "- VLM (AI): Disabled\n"
+            
+            summary += "\nThis mode provides the most accurate results by combining\n"
+            summary += "fast texture analysis with intelligent AI understanding.\n"
 
         else:
             summary = f"Analysis complete: {layer_name} ({confidence:.0%} confidence)"
