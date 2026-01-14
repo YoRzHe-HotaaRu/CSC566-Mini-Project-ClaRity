@@ -37,7 +37,7 @@ ROAD_LAYERS = {
         "name": "Subgrade",
         "full_name": "Compacted Subgrade",
         "material": "In-site soil/backfill",
-        "color": (139, 90, 43),  # Brown (BGR)
+        "color": (43, 90, 139),  # Brown (BGR)
         "hex_color": "#8B5A2B"
     },
     2: {
@@ -51,22 +51,22 @@ ROAD_LAYERS = {
         "name": "Base Course",
         "full_name": "Base Course",
         "material": "Crushed aggregate (finer)",
-        "color": (169, 169, 169),  # Dark Gray (BGR)
+        "color": (169, 169, 169),  # Light Gray (BGR)
         "hex_color": "#A9A9A9"
     },
     4: {
         "name": "Binder Course",
         "full_name": "Binder Course",
         "material": "Premix asphalt",
-        "color": (50, 50, 50),  # Dark (BGR)
-        "hex_color": "#323232"
+        "color": (70, 70, 70),  # Dark Gray (BGR) - asphalt
+        "hex_color": "#464646"
     },
     5: {
         "name": "Surface Course",
         "full_name": "Wearing Course",
         "material": "Premix asphalt (smooth)",
-        "color": (30, 30, 30),  # Very Dark (BGR)
-        "hex_color": "#1E1E1E"
+        "color": (50, 50, 50),  # Very Dark Gray (BGR) - asphalt
+        "hex_color": "#323232"
     }
 }
 
@@ -75,8 +75,8 @@ LAYER_COLORS_RGB = {
     1: (139/255, 90/255, 43/255),   # Brown - Subgrade
     2: (128/255, 128/255, 128/255), # Gray - Subbase
     3: (169/255, 169/255, 169/255), # Light Gray - Base
-    4: (80/255, 80/255, 80/255),    # Dark Gray - Binder
-    5: (40/255, 40/255, 40/255)     # Very Dark - Surface
+    4: (70/255, 70/255, 70/255),    # Dark Gray - Binder (asphalt)
+    5: (50/255, 50/255, 50/255)     # Very Dark Gray - Surface (asphalt)
 }
 
 # =============================================================================

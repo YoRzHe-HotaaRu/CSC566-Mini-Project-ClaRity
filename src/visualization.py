@@ -192,7 +192,7 @@ def create_colored_segmentation(
     Create colored image from segmentation labels.
     
     Args:
-        labels: Segmentation labels (1-indexed)
+        labels: Segmentation labels (any values supported)
         
     Returns:
         BGR colored image
@@ -200,12 +200,25 @@ def create_colored_segmentation(
     h, w = labels.shape
     colored = np.zeros((h, w, 3), dtype=np.uint8)
     
-    for layer_num in range(1, 6):
-        if layer_num in ROAD_LAYERS:
-            mask = labels == layer_num
-            if mask.any():
-                color = ROAD_LAYERS[layer_num]["color"]
-                colored[mask] = color
+    # Get unique labels in the image
+    unique_labels = np.unique(labels)
+    
+    for label in unique_labels:
+        mask = labels == label
+        if not mask.any():
+            continue
+            
+        # Map label to layer color (1-indexed, use modulo for out-of-range)
+        if label in ROAD_LAYERS:
+            color = ROAD_LAYERS[label]["color"]
+        elif label >= 1 and label <= 5:
+            color = ROAD_LAYERS[int(label)]["color"]
+        else:
+            # For labels outside 1-5, map using modulo
+            mapped_layer = ((label - 1) % 5) + 1
+            color = ROAD_LAYERS[int(mapped_layer)]["color"]
+        
+        colored[mask] = color
     
     return colored
 

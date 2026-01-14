@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -1491,9 +1492,13 @@ class MainWindow(QMainWindow):
         if "vlm_visualization" in result and self.mode == "vlm":
             # Use the enhanced VLM overlay visualization
             self.result_label.setImage(result["vlm_visualization"])
+            # Store for PDF export
+            self.result["colored_segmentation"] = result["vlm_visualization"]
         elif "labels" in result:
             colored = create_colored_segmentation(result["labels"])
             self.result_label.setImage(colored)
+            # Store for PDF export
+            self.result["colored_segmentation"] = colored
         
         # Update legend
         if "labels" in result:
@@ -1760,21 +1765,58 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Analysis failed")
     
     def save_result(self):
-        """Save analysis result to file."""
-        if self.result is None or "labels" not in self.result:
+        """Save analysis result as PDF report or image."""
+        if self.result is None:
+            QMessageBox.warning(self, "No Results", "Please run an analysis first.")
             return
         
-        file_path, _ = QFileDialog.getSaveFileName(
+        # Generate default filename
+        classification = self.result.get("classification", {})
+        layer_name = classification.get("layer_name", "Unknown")
+        layer_short = layer_name.replace(" ", "_").replace("/", "-")
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        default_name = f"Report_{date_str}_{layer_short}"
+        
+        file_path, selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Save Result",
-            "",
-            "PNG Image (*.png);;JPEG Image (*.jpg)"
+            "Export Analysis Report",
+            default_name,
+            "PDF Report (*.pdf);;PNG Image (*.png);;JPEG Image (*.jpg)"
         )
         
-        if file_path:
-            colored = create_colored_segmentation(self.result["labels"])
-            cv2.imwrite(file_path, colored)
-            self.status_bar.showMessage(f"Saved: {Path(file_path).name}")
+        if not file_path:
+            return
+            
+        if file_path.lower().endswith('.pdf'):
+            # Generate PDF report
+            try:
+                from src.report_generator import generate_report
+                
+                success = generate_report(
+                    result=self.result,
+                    image=self.image,
+                    mode=self.mode,
+                    params=self.get_parameters(),
+                    output_path=file_path
+                )
+                
+                if success:
+                    QMessageBox.information(
+                        self, "Report Saved",
+                        f"PDF report saved successfully!\n\n{Path(file_path).name}"
+                    )
+                    self.status_bar.showMessage(f"Report saved: {Path(file_path).name}")
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to generate report.")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Report generation failed:\n{str(e)}")
+        else:
+            # Save as image (original behavior)
+            if "labels" in self.result:
+                colored = create_colored_segmentation(self.result["labels"])
+                cv2.imwrite(file_path, colored)
+                self.status_bar.showMessage(f"Image saved: {Path(file_path).name}")
     
     def show_about(self):
         """Show about dialog."""
