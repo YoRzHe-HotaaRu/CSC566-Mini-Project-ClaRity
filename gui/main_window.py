@@ -161,25 +161,86 @@ class AnalysisWorker(QThread):
                 result["classification"] = classification
             
             elif self.mode == "deep_learning":
-                self.progress.emit(50, "Running DeepLabv3+ inference...")
+                self.progress.emit(30, "Initializing DeepLabv3+ model...")
                 try:
                     from src.deep_learning import DeepLabSegmenter
+                    from src.config import ROAD_LAYERS
                     
-                    # Use parameters from GUI (Bug 3-5 fix)
-                    backbone = self.params.get("dl_backbone", "ResNet-101").lower().replace("-", "")
+                    # Get parameters from GUI
+                    backbone_raw = self.params.get("dl_backbone", "ResNet-101")
+                    backbone = backbone_raw.lower().replace("-", "")
+                    use_pretrained = self.params.get("dl_pretrained", True)
                     use_cuda = "cuda" in self.params.get("dl_device", "CPU").lower()
+                    resolution = self.params.get("dl_resolution", "512x512")
+                    confidence_threshold = self.params.get("dl_confidence_threshold", 0.5)
                     
+                    # Handle resolution
+                    self.progress.emit(40, f"Preparing image ({resolution})...")
+                    if resolution == "512x512":
+                        input_image = cv2.resize(self.image, (512, 512))
+                    elif resolution == "256x256":
+                        input_image = cv2.resize(self.image, (256, 256))
+                    else:  # Original
+                        input_image = self.image.copy()
+                    
+                    # Create segmenter with pretrained option
+                    self.progress.emit(50, "Loading model...")
+                    encoder_weights = "imagenet" if use_pretrained else None
                     segmenter = DeepLabSegmenter(
                         encoder_name=backbone,
+                        encoder_weights=encoder_weights,
                         use_cuda=use_cuda
                     )
-                    labels = segmenter.segment(self.image)
+                    
+                    # Run inference
+                    self.progress.emit(70, "Running inference...")
+                    labels = segmenter.segment(input_image)
+                    
+                    # Resize labels back to original size if needed
+                    if resolution != "Original":
+                        labels = cv2.resize(
+                            labels.astype(np.uint8),
+                            (self.image.shape[1], self.image.shape[0]),
+                            interpolation=cv2.INTER_NEAREST
+                        )
+                    
                     result["labels"] = labels
+                    
+                    # Classify dominant layer from predictions
+                    self.progress.emit(85, "Analyzing predictions...")
+                    unique, counts = np.unique(labels, return_counts=True)
+                    total_pixels = labels.size
+                    
+                    # Find dominant layer (most pixels)
+                    dominant_idx = np.argmax(counts)
+                    dominant_layer = int(unique[dominant_idx])
+                    dominant_pct = counts[dominant_idx] / total_pixels
+                    
+                    # Get layer info
+                    layer_info = ROAD_LAYERS.get(dominant_layer, {})
+                    layer_name = layer_info.get("name", f"Layer {dominant_layer}")
+                    material = layer_info.get("material", "Unknown")
+                    
+                    # Build layer distribution info
+                    layer_dist = {}
+                    for layer, count in zip(unique, counts):
+                        pct = count / total_pixels
+                        if pct >= confidence_threshold:  # Only show layers above threshold
+                            linfo = ROAD_LAYERS.get(int(layer), {})
+                            layer_dist[int(layer)] = {
+                                "name": linfo.get("name", f"Layer {layer}"),
+                                "percentage": pct
+                            }
+                    
+                    result["layer_distribution"] = layer_dist
                     result["classification"] = {
-                        "layer_name": "Deep Learning Segmentation",
-                        "confidence": 0.85,
-                        "method": f"DeepLabv3+ ({backbone}, {'CUDA' if use_cuda else 'CPU'})"
+                        "layer_number": dominant_layer,
+                        "layer_name": layer_name,
+                        "material": material,
+                        "confidence": dominant_pct,
+                        "method": f"DeepLabv3+ ({backbone_raw}, {'CUDA' if use_cuda else 'CPU'})"
                     }
+                    
                 except Exception as e:
                     self.error.emit(f"Deep learning error: {str(e)}")
                     return
@@ -740,7 +801,7 @@ class MainWindow(QMainWindow):
         
         self.mode_classical = QRadioButton("Classical (Texture-based)")
         self.mode_classical.setChecked(True)
-        self.mode_dl = QRadioButton("Deep Learning (DeepLabv3+)")
+        self.mode_dl = QRadioButton("Deep Learning (CNN Classifier)")
         self.mode_vlm = QRadioButton("VLM Analysis (GLM-4.6V)")
         self.mode_hybrid = QRadioButton("Hybrid (Classical + AI)")
         
@@ -873,17 +934,27 @@ class MainWindow(QMainWindow):
         model_layout.addWidget(QLabel("Backbone:"), 0, 0)
         self.backbone_combo = QComboBox()
         self.backbone_combo.addItems(["ResNet-101", "ResNet-50", "MobileNetV2"])
+        self.backbone_combo.setToolTip(
+            "ResNet-101: Best accuracy, slowest\n"
+            "ResNet-50: Good balance\n"
+            "MobileNetV2: Fastest, lower accuracy"
+        )
         model_layout.addWidget(self.backbone_combo, 0, 1)
         
         # Pretrained
         self.pretrained_check = QCheckBox("Use Pretrained (ImageNet)")
         self.pretrained_check.setChecked(True)
+        self.pretrained_check.setToolTip(
+            "When enabled, uses weights pre-trained on ImageNet.\n"
+            "Gives better results for general images."
+        )
         model_layout.addWidget(self.pretrained_check, 1, 0, 1, 2)
         
         # Device selection
         model_layout.addWidget(QLabel("Device:"), 2, 0)
         self.device_combo = QComboBox()
         self.device_combo.addItems(["CPU", "CUDA (GPU)"])
+        self.device_combo.setToolTip("CUDA requires NVIDIA GPU with CUDA support")
         model_layout.addWidget(self.device_combo, 2, 1)
         
         layout.addWidget(model_group)
@@ -892,26 +963,33 @@ class MainWindow(QMainWindow):
         infer_group = QGroupBox("Inference Settings")
         infer_layout = QGridLayout(infer_group)
         
+        # Input resolution
+        infer_layout.addWidget(QLabel("Input Resolution:"), 0, 0)
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItems(["512x512", "256x256", "Original"])
+        self.resolution_combo.setToolTip(
+            "512x512: Best quality (default)\n"
+            "256x256: Faster, lower detail\n"
+            "Original: Uses image's original size"
+        )
+        infer_layout.addWidget(self.resolution_combo, 0, 1)
+        
         # Confidence threshold
-        infer_layout.addWidget(QLabel("Confidence Threshold:"), 0, 0)
+        infer_layout.addWidget(QLabel("Confidence Threshold:"), 1, 0)
         self.confidence_spin = QDoubleSpinBox()
         self.confidence_spin.setRange(0.0, 1.0)
         self.confidence_spin.setValue(0.5)
         self.confidence_spin.setSingleStep(0.1)
-        infer_layout.addWidget(self.confidence_spin, 0, 1)
+        self.confidence_spin.setToolTip(
+            "Minimum confidence for predictions.\n"
+            "Higher = stricter, fewer predictions."
+        )
+        infer_layout.addWidget(self.confidence_spin, 1, 1)
         
-        # Batch size
-        infer_layout.addWidget(QLabel("Batch Size:"), 1, 0)
+        # Hidden batch_spin for compatibility (always 1)
         self.batch_spin = QSpinBox()
-        self.batch_spin.setRange(1, 16)
         self.batch_spin.setValue(1)
-        infer_layout.addWidget(self.batch_spin, 1, 1)
-        
-        # Output resolution
-        infer_layout.addWidget(QLabel("Output Resolution:"), 2, 0)
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(["Original", "512x512", "256x256"])
-        infer_layout.addWidget(self.resolution_combo, 2, 1)
+        self.batch_spin.setVisible(False)
         
         layout.addWidget(infer_group)
         layout.addStretch()
@@ -1600,10 +1678,23 @@ class MainWindow(QMainWindow):
 
         elif mode == "deep_learning":
             summary = "Deep Learning Analysis Summary\n\n"
-            summary += f"The neural network (DeepLabv3+) segmented your image.\n\n"
-            summary += f"Primary Layer: {layer_name}\n\n"
-            summary += f"This mode uses advanced AI trained on thousands of road images to identify layers.\n"
-            summary += f"Great for complex images with mixed materials.\n"
+            summary += f"DeepLabv3+ segmented your image:\n\n"
+            summary += f"Dominant Layer: {layer_name}\n"
+            summary += f"Coverage: {confidence:.0%} of image\n"
+            if material and material != "Unknown":
+                summary += f"Material: {material}\n"
+            summary += "\n"
+            
+            # Show layer distribution if available
+            layer_dist = result.get("layer_distribution", {})
+            if layer_dist:
+                summary += "Layer Distribution:\n"
+                for layer_num, info in sorted(layer_dist.items(), key=lambda x: -x[1]["percentage"]):
+                    summary += f"  • {info['name']}: {info['percentage']:.0%}\n"
+                summary += "\n"
+            
+            summary += "This mode uses neural networks trained on road images\n"
+            summary += "to identify and segment multiple layer types.\n"
 
         elif mode == "classical":
             summary = "Classical Analysis Summary\n\n"
