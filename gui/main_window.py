@@ -1790,12 +1790,22 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    """Main entry point."""
+    """Main entry point with splash screen."""
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
-    window = MainWindow()
-    window.show()
+    # Import and show splash screen
+    from gui.splash_screen import SplashScreen
+    
+    main_window = None
+    
+    def on_splash_finished():
+        nonlocal main_window
+        main_window = MainWindow()
+        main_window.show()
+    
+    splash = SplashScreen(on_finished=on_splash_finished)
+    splash.show()
     
     sys.exit(app.exec_())
 
