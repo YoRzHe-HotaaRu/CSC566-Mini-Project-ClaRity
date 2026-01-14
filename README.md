@@ -1,4 +1,4 @@
-# 🛣️ Automated Road Surface Layers Analysis using Texture-Based Image Segmentation
+# 🛣️ Automated Road Surface Layer Identification and Analysis using Multi-Method Image Processing System
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 
 ## 📚 Project Information
 
-| **Project Title** | Automated Road Surface Layers Analysis using Texture-Based Image Segmentation |
+| **Project Title** | Automated Road Surface Layer Identification and Analysis using Multi-Method Image Processing System |
 |-----------|---------|
 | **Course** | CSC566 - Image Processing |
 | **Group Name** | ClaRity Group |
@@ -52,7 +52,35 @@
 
 ## 🎯 Overview
 
-This project implements an **automated system** for analyzing road construction layers from **Google Earth Pro aerial satellite images**. Using texture-based image segmentation techniques combined with optional deep learning and AI analysis, the system identifies and classifies **5 distinct road construction layers**.
+This project implements an **automated system** for analyzing road construction layers from **Google Earth Pro aerial satellite images**. Using a **multi-method approach** that combines classical image processing, deep learning, and AI-powered vision analysis, the system identifies and classifies **5 distinct road construction layers**.
+
+### Key Highlights
+
+| Feature | Description |
+|---------|-------------|
+| 🔬 **Classical Analysis** | GLCM, LBP, Gabor texture features with K-Means/SLIC/Watershed segmentation |
+| 🧠 **Deep Learning** | DeepLabv3+ semantic segmentation with CUDA acceleration |
+| 🤖 **Vision AI (VLM)** | GLM-4.6V Vision Language Model for intelligent layer identification |
+| 🔀 **Hybrid Mode** | Combines classical and AI methods for best accuracy |
+| 🖥️ **Professional GUI** | PyQt5 interface with real-time analysis and visualization |
+
+### Screenshots
+
+<div align="center">
+
+| Main Interface | Segmentation Result |
+|:--------------:|:-------------------:|
+| ![Main GUI](docs/screenshots/main_gui_placeholder.png) | ![Segmentation](docs/screenshots/segmentation_placeholder.png) |
+| *Load image and select analysis mode* | *Color-coded layer segmentation* |
+
+| VLM Analysis | Legend & Results |
+|:------------:|:----------------:|
+| ![VLM Mode](docs/screenshots/vlm_analysis_placeholder.png) | ![Results](docs/screenshots/results_placeholder.png) |
+| *AI-powered layer identification* | *Detailed analysis with texture features* |
+
+</div>
+
+> **Note:** Replace placeholder images with actual screenshots after deployment.
 
 ### Project Information
 
@@ -114,25 +142,27 @@ The system classifies **5 distinct road construction layers**, representing the 
 
 ## ✨ Features
 
+### 4 Analysis Modes
+
+| Mode | Method | Best For |
+|------|--------|----------|
+| 🔬 **Classical** | GLCM, LBP, Gabor + K-Means/SLIC/Watershed | Fast, texture-based analysis |
+| 🧠 **Deep Learning** | DeepLabv3+ with ResNet backbone | Complex, mixed-material images |
+| 🤖 **VLM Analysis** | GLM-4.6V Vision Language Model | AI-powered intelligent identification |
+| 🔀 **Hybrid** | Classical + AI validation | Highest accuracy analysis |
+
 ### Core Capabilities
 
-- 🔬 **Texture-Based Analysis** - GLCM, LBP, Gabor filters for texture extraction
-- 🎨 **Multi-Mode Segmentation** - K-Means, Watershed, Superpixels
-- 🧠 **Deep Learning** - DeepLabv3+ semantic segmentation
-- 🤖 **AI Analysis** - GLM-4.6V Vision Language Model integration
-- 🖥️ **GUI Application** - Professional PyQt5 interface
-- ⚡ **GPU Acceleration** - CUDA-enabled for fast processing
-- 📊 **Comprehensive Reports** - Statistics, metrics, and visualizations
-
-### Analysis Capabilities
-
-| Feature | Description |
-|---------|-------------|
-| **Preprocessing** | Noise reduction, contrast enhancement, color space conversion |
-| **Texture Features** | GLCM (Contrast, Energy, Homogeneity), LBP, Gabor |
-| **Segmentation** | K-Means, Watershed, SLIC Superpixels |
-| **Classification** | 5-class road layer classification |
-| **Morphology** | Erosion, dilation, hole filling, connected components |
+| Category | Features |
+|----------|----------|
+| **Preprocessing** | Median/Gaussian/Bilateral noise filters, CLAHE contrast enhancement, adjustable parameters |
+| **Texture Features** | GLCM (Contrast, Energy, Homogeneity, Correlation), LBP patterns, Gabor filters |
+| **Segmentation** | K-Means clustering, SLIC Superpixels, Watershed algorithm |
+| **Post-Processing** | Morphological cleanup (opening/closing), hole filling, connected components |
+| **Classification** | 5-layer road structure identification with confidence scores |
+| **Visualization** | Color-coded segmentation, edge-enhanced VLM overlay, interactive legend |
+| **GUI** | Professional PyQt5 interface with drag-drop support, real-time progress |
+| **GPU** | CUDA-accelerated deep learning inference |
 
 ---
 
@@ -275,7 +305,7 @@ AI-powered analysis using Vision Language Model:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ ▼ VLM SETTINGS                                                          │
 │   Model:           GLM-4.6V (via ZenMux API)                            │
-│   Analysis Type:   [● Layer ID]  [○ Detailed]  [○ Comparison]           │
+│   Analysis Type:   [● Layer ID]  [○ Detailed]  [○ Quick Scan]          │
 │   Temperature:     [0.3 ────○────]                                      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ ▼ OUTPUT OPTIONS                                                        │
