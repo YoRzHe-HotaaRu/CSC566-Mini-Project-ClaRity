@@ -50,16 +50,23 @@ class AnalysisWorker(QThread):
         try:
             result = {}
             
-            # Step 1: Preprocessing
+            # Step 1: Preprocessing - NOW uses CLAHE clip and contrast method
             self.progress.emit(10, "Preprocessing image...")
             preprocessed = preprocess_image(
                 self.image,
                 denoise=self.params.get("noise_filter", "median"),
                 denoise_kernel=self.params.get("kernel_size", 3),
                 enhance=self.params.get("contrast_method", "clahe"),
+                enhance_clip_limit=self.params.get("clahe_clip", 2.0),
                 color_space="gray"
             )
             result["preprocessed"] = preprocessed
+            result["preprocessing_params"] = {
+                "noise_filter": self.params.get("noise_filter", "median"),
+                "kernel_size": self.params.get("kernel_size", 3),
+                "contrast_method": self.params.get("contrast_method", "clahe"),
+                "clahe_clip": self.params.get("clahe_clip", 2.0)
+            }
             
             if self.mode == "classical":
                 # Step 2: Texture features
@@ -72,22 +79,85 @@ class AnalysisWorker(QThread):
                 )
                 result["features"] = features
                 
-                # Step 3: Segmentation
+                # Step 3: Segmentation - NOW uses selected method!
                 self.progress.emit(60, "Segmenting image...")
                 n_clusters = self.params.get("n_clusters", 5)
-                labels, _ = kmeans_segment(self.image, n_clusters=n_clusters)
+                seg_method = self.params.get("segmentation_method", "K-Means")
                 
-                # Step 4: Morphological cleanup
+                # Import segmentation functions
+                from src.segmentation import kmeans_segment, slic_segment, watershed_segment
+                
+                if seg_method == "SLIC Superpixels":
+                    # First create superpixels
+                    superpixel_labels = slic_segment(self.image, n_segments=n_clusters * 50, compactness=10.0)
+                    
+                    # Compute mean color per superpixel and cluster those
+                    unique_sp = np.unique(superpixel_labels)
+                    sp_colors = []
+                    for sp in unique_sp:
+                        mask = superpixel_labels == sp
+                        mean_color = self.image[mask].mean(axis=0)
+                        sp_colors.append(mean_color)
+                    sp_colors = np.array(sp_colors, dtype=np.float32)
+                    
+                    # K-Means cluster the superpixel colors
+                    from sklearn.cluster import KMeans
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    sp_cluster_labels = kmeans.fit_predict(sp_colors)
+                    
+                    # Map superpixel clusters back to full image
+                    labels = np.zeros_like(superpixel_labels)
+                    for idx, sp in enumerate(unique_sp):
+                        labels[superpixel_labels == sp] = sp_cluster_labels[idx]
+                elif seg_method == "Watershed":
+                    gray_img = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY) if len(self.image.shape) == 3 else self.image
+                    labels = watershed_segment(gray_img)
+                    # Limit to n_clusters by mapping
+                    unique = np.unique(labels)
+                    if len(unique) > n_clusters:
+                        labels = (labels % n_clusters)
+                else:  # K-Means (default)
+                    labels, _ = kmeans_segment(self.image, n_clusters=n_clusters)
+                
+                result["segmentation_method"] = seg_method
+                
+                # Step 4: Morphological cleanup - FIXED LOGIC
                 self.progress.emit(80, "Refining segmentation...")
-                if self.params.get("use_morphology", True):
-                    # Apply cleanup per segment
-                    pass
+                use_morphology = self.params.get("use_morphology", True)
+                fill_holes = self.params.get("fill_holes", True)
+                
+                if use_morphology or fill_holes:
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                    cleaned_labels = np.zeros_like(labels)
+                    
+                    for i in range(n_clusters):
+                        mask = (labels == i).astype(np.uint8)
+                        
+                        if use_morphology:
+                            # Opening removes small noise (erosion then dilation)
+                            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+                            # Closing fills small gaps (dilation then erosion)
+                            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+                        
+                        if fill_holes:
+                            # Fill holes using contour filling
+                            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            mask_filled = np.zeros_like(mask)
+                            cv2.drawContours(mask_filled, contours, -1, 1, -1)
+                            mask = mask_filled
+                        
+                        cleaned_labels[mask == 1] = i
+                    
+                    labels = cleaned_labels
                 
                 result["labels"] = labels + 1  # 1-indexed
+                result["morphology_applied"] = use_morphology
+                result["fill_holes_applied"] = fill_holes
                 
-                # Step 5: Classification
+                # Step 6: Classification
                 self.progress.emit(90, "Classifying layers...")
                 classification = get_layer_by_texture_heuristic(features)
+                classification["method"] = f"Classical ({seg_method})"
                 result["classification"] = classification
             
             elif self.mode == "deep_learning":
@@ -1213,6 +1283,28 @@ class MainWindow(QMainWindow):
             text += f"Homogeneity: {glcm.get('homogeneity', 0):.4f}\n"
             text += f"Correlation: {glcm.get('correlation', 0):.4f}\n"
         
+        # Show preprocessing params for Classical/Hybrid mode
+        if self.mode in ["classical", "hybrid"]:
+            text += "\n─── Settings Used ───\n"
+            preproc = result.get("preprocessing_params", {})
+            text += f"Noise Filter: {preproc.get('noise_filter', 'N/A')}\n"
+            text += f"Kernel Size:  {preproc.get('kernel_size', 'N/A')}\n"
+            text += f"Contrast:     {preproc.get('contrast_method', 'N/A')}\n"
+            if preproc.get('contrast_method') == 'clahe':
+                text += f"CLAHE Clip:   {preproc.get('clahe_clip', 'N/A')}\n"
+            seg_method = result.get("segmentation_method", "K-Means")
+            text += f"Segmentation: {seg_method}\n"
+            morph = "Yes" if result.get("morphology_applied", False) else "No"
+            holes = "Yes" if result.get("fill_holes_applied", False) else "No"
+            text += f"Morphology:   {morph}\n"
+            text += f"Fill Holes:   {holes}\n"
+            
+            # Show feature extraction settings
+            text += "\n─── Features Used ───\n"
+            text += f"GLCM: {'Yes' if self.glcm_check.isChecked() else 'No'}\n"
+            text += f"LBP:  {'Yes' if self.lbp_check.isChecked() else 'No'}\n"
+            text += f"Gabor: {'Yes' if self.gabor_check.isChecked() else 'No'}\n"
+        
         self.results_text.setText(text)
         
         # Generate plain-English summary (also respects Output Options)
@@ -1235,28 +1327,31 @@ class MainWindow(QMainWindow):
         for layer_num in range(1, 6):
             if layer_num in self.legend_items:
                 layer = ROAD_LAYERS[layer_num]
-                color = layer["hex_color"]
+                hex_color = layer["hex_color"]
                 
                 self.legend_items[layer_num].setVisible(True)
                 
                 if layer_num in detected_layers:
-                    # Detected layer: bright, bold, with checkmark
+                    # Detected layer: use layer color as background, white text
                     self.legend_items[layer_num].setStyleSheet(f'''
-                        color: {color}; 
+                        color: white; 
                         font-weight: bold; 
-                        padding: 2px 8px;
+                        padding: 4px 10px;
                         font-size: 11px;
-                        background-color: rgba(255, 255, 255, 0.1);
+                        background-color: {hex_color};
                         border-radius: 4px;
+                        border: 2px solid white;
                     ''')
                     self.legend_items[layer_num].setText(f"✓ {layer['name']}")
                 else:
-                    # Non-detected layer: dimmed, not bold
+                    # Non-detected layer: dimmed, gray background
                     self.legend_items[layer_num].setStyleSheet(f'''
-                        color: #666; 
+                        color: #888; 
                         font-weight: normal; 
-                        padding: 2px 8px;
+                        padding: 4px 10px;
                         font-size: 9px;
+                        background-color: #333;
+                        border-radius: 4px;
                     ''')
                     self.legend_items[layer_num].setText(f"■ {layer['name']}")
 
@@ -1317,9 +1412,18 @@ class MainWindow(QMainWindow):
             if material:
                 summary += f"Material Type: {material}\n\n"
 
+            # Get actual segmentation method from result
+            seg_method = result.get("segmentation_method", "K-Means")
+            preproc = result.get("preprocessing_params", {})
+            
+            summary += "Settings Used:\n"
+            summary += f"- Noise Filter: {preproc.get('noise_filter', 'median')}\n"
+            summary += f"- Contrast: {preproc.get('contrast_method', 'clahe')}\n"
+            summary += f"- Segmentation: {seg_method}\n\n"
+            
             summary += "How it worked:\n"
             summary += "- Extracted texture features (GLCM, LBP)\n"
-            summary += "- Applied K-means clustering segmentation\n"
+            summary += f"- Applied {seg_method} segmentation\n"
             summary += "- Used heuristic rules to classify layers\n\n"
             summary += "This mode is fast and works well for clear, distinct textures.\n"
 
