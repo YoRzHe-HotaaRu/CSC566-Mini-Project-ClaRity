@@ -285,9 +285,11 @@ class AnalysisWorker(QThread):
 
                     # Create ENHANCED VLM visualization with ROAD LAYER HIGHLIGHTING
                     h, w = self.image.shape[:2]
-                    layer_num = vlm_result.get("layer_number", 1)
-                    confidence = vlm_result.get("confidence", 0.5)
-                    layer_name = vlm_result.get("layer_name", "Unknown")
+                    layer_num = vlm_result.get("layer_number") or 1
+                    confidence = vlm_result.get("confidence")
+                    if confidence is None:
+                        confidence = 0.5
+                    layer_name = vlm_result.get("layer_name") or "Unknown"
                     
                     # Get layer color from config
                     from src.config import ROAD_LAYERS, LAYER_COLORS_RGB
@@ -1370,6 +1372,7 @@ class MainWindow(QMainWindow):
         if file_path:
             self.image = cv2.imread(file_path)
             if self.image is not None:
+                self.image_filename = Path(file_path).name  # Store filename for PDF report
                 self.original_label.setImage(self.image)
                 self.analyze_btn.setEnabled(True)
                 self.status_bar.showMessage(f"Loaded: {Path(file_path).name}")
@@ -1390,6 +1393,7 @@ class MainWindow(QMainWindow):
         if file_path:
             self.image = cv2.imread(file_path)
             if self.image is not None:
+                self.image_filename = Path(file_path).name  # Store filename for PDF report
                 self.original_label.setImage(self.image)
                 self.analyze_btn.setEnabled(True)
                 self.status_bar.showMessage(f"Loaded (dropped): {Path(file_path).name}")
@@ -1462,6 +1466,9 @@ class MainWindow(QMainWindow):
         if self.image is None:
             return
         
+        import time
+        self.analysis_start_time = time.time()  # Start timing
+        
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.analyze_btn.setEnabled(False)
@@ -1483,6 +1490,19 @@ class MainWindow(QMainWindow):
     
     def analysis_complete(self, result: dict):
         """Handle analysis completion."""
+        import time
+        
+        # Calculate processing time
+        if hasattr(self, 'analysis_start_time'):
+            processing_time = time.time() - self.analysis_start_time
+            result["processing_time"] = processing_time
+        
+        # Store source filename
+        if hasattr(self, 'image_filename'):
+            result["source_filename"] = self.image_filename
+        else:
+            result["source_filename"] = "Unknown"
+        
         self.result = result
         self.progress_bar.setVisible(False)
         self.analyze_btn.setEnabled(True)

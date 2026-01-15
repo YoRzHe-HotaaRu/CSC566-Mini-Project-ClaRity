@@ -196,6 +196,21 @@ class ReportGenerator:
             self.styles['ReportCaption']
         ))
         
+        # Source image filename
+        source_filename = self.result.get("source_filename", "Unknown")
+        self.elements.append(Paragraph(
+            f"Source Image: {source_filename}",
+            self.styles['ReportCaption']
+        ))
+        
+        # Processing time
+        processing_time = self.result.get("processing_time")
+        if processing_time:
+            self.elements.append(Paragraph(
+                f"Processing Time: {processing_time:.2f} seconds",
+                self.styles['ReportCaption']
+            ))
+        
         # Horizontal line
         self.elements.append(HRFlowable(
             width="100%", thickness=1, color=self.COLORS['primary_blue']
@@ -395,27 +410,106 @@ class ReportGenerator:
             self.styles['SectionHeading']
         ))
         
+        # Mode name mapping for better display
+        mode_names = {
+            "classical": "Classical (Texture Analysis)",
+            "vlm": "VLM (GLM-4.6V AI Vision)",
+            "deep_learning": "Deep Learning (CNN Classifier)",
+            "hybrid": "Hybrid (Classical + AI)"
+        }
+        
         # Create settings table
         table_data = [["Parameter", "Value"]]
         
-        table_data.append(["Analysis Mode", self.mode.replace("_", " ").title()])
+        # Analysis mode (always shown first)
+        table_data.append(["Analysis Mode", mode_names.get(self.mode, self.mode.replace("_", " ").title())])
         
         if self.mode == "classical":
+            # Preprocessing settings
+            table_data.append(["", ""])  # Separator
+            table_data.append(["— PREPROCESSING —", ""])
+            table_data.append(["Noise Filter", self.params.get("noise_filter", "median")])
+            table_data.append(["Kernel Size", str(self.params.get("kernel_size", 3))])
+            table_data.append(["Contrast Method", self.params.get("contrast_method", "clahe")])
+            if self.params.get("contrast_method") == "clahe":
+                table_data.append(["CLAHE Clip Limit", str(self.params.get("clahe_clip", 2.0))])
+            
+            # Feature extraction
+            table_data.append(["", ""])
+            table_data.append(["— FEATURE EXTRACTION —", ""])
+            table_data.append(["GLCM Features", "Yes" if self.params.get("use_glcm", True) else "No"])
+            table_data.append(["LBP Features", "Yes" if self.params.get("use_lbp", True) else "No"])
+            table_data.append(["Gabor Features", "Yes" if self.params.get("use_gabor", False) else "No"])
+            
+            # Segmentation
+            table_data.append(["", ""])
+            table_data.append(["— SEGMENTATION —", ""])
+            table_data.append(["Segmentation Method", self.params.get("segmentation_method", "K-Means")])
+            table_data.append(["Number of Clusters", str(self.params.get("n_clusters", 5))])
+            
+            # Morphology
+            table_data.append(["", ""])
+            table_data.append(["— POST-PROCESSING —", ""])
+            table_data.append(["Morphological Ops", "Yes" if self.params.get("use_morphology") else "No"])
+            table_data.append(["Fill Holes", "Yes" if self.params.get("fill_holes") else "No"])
+            
+        elif self.mode == "vlm":
+            # VLM-specific settings
+            table_data.append(["", ""])
+            table_data.append(["— VLM SETTINGS —", ""])
+            table_data.append(["Analysis Type", self.params.get("vlm_analysis_type", "Layer ID")])
+            table_data.append(["Temperature", str(self.params.get("vlm_temperature", 0.3))])
+            table_data.append(["Model", "GLM-4.6V"])
+            
+            # Output options
+            table_data.append(["", ""])
+            table_data.append(["— OUTPUT OPTIONS —", ""])
+            table_data.append(["Include Layer Name", "Yes" if self.params.get("vlm_include_layer", True) else "No"])
+            table_data.append(["Include Confidence", "Yes" if self.params.get("vlm_include_confidence", True) else "No"])
+            table_data.append(["Include Material", "Yes" if self.params.get("vlm_include_material", True) else "No"])
+            table_data.append(["Include Texture", "Yes" if self.params.get("vlm_include_texture", True) else "No"])
+            table_data.append(["Include Recommendations", "Yes" if self.params.get("vlm_include_recommendations", True) else "No"])
+            
+        elif self.mode == "deep_learning":
+            # Deep Learning settings
+            table_data.append(["", ""])
+            table_data.append(["— MODEL SETTINGS —", ""])
+            table_data.append(["Backbone Network", self.params.get("dl_backbone", "ResNet-101")])
+            table_data.append(["Use Pretrained", "Yes" if self.params.get("dl_pretrained", True) else "No"])
+            table_data.append(["Device", self.params.get("dl_device", "CPU")])
+            
+            # Inference settings
+            table_data.append(["", ""])
+            table_data.append(["— INFERENCE SETTINGS —", ""])
+            table_data.append(["Input Resolution", self.params.get("dl_resolution", "512x512")])
+            table_data.append(["Confidence Threshold", f"{self.params.get('dl_confidence_threshold', 0.1):.0%}"])
+            
+        elif self.mode == "hybrid":
+            # Hybrid mode settings
+            classical_weight = self.params.get("classical_weight", 0.7)
+            ai_weight = 1 - classical_weight
+            
+            table_data.append(["", ""])
+            table_data.append(["— WEIGHTING —", ""])
+            table_data.append(["Classical Weight", f"{classical_weight:.0%}"])
+            table_data.append(["AI Weight", f"{ai_weight:.0%}"])
+            table_data.append(["VLM Validation", "Enabled" if self.params.get("hybrid_vlm_validation", True) else "Disabled"])
+            table_data.append(["Conflict Rule", self.params.get("hybrid_conflict_rule", "Weighted Average")])
+            
+            # Classical settings used
+            table_data.append(["", ""])
+            table_data.append(["— CLASSICAL SETTINGS —", ""])
             table_data.append(["Noise Filter", self.params.get("noise_filter", "median")])
             table_data.append(["Contrast Method", self.params.get("contrast_method", "clahe")])
             table_data.append(["Segmentation", self.params.get("segmentation_method", "K-Means")])
             table_data.append(["Clusters", str(self.params.get("n_clusters", 5))])
-            table_data.append(["Morphology", "Yes" if self.params.get("use_morphology") else "No"])
             
-        elif self.mode == "hybrid":
-            table_data.append(["Classical Weight", f"{self.params.get('classical_weight', 0.7):.0%}"])
-            table_data.append(["VLM Validation", "Yes" if self.params.get("hybrid_vlm_validation") else "No"])
-            table_data.append(["Conflict Rule", self.params.get("hybrid_conflict_rule", "Weighted Average")])
-            
-        elif self.mode == "deep_learning":
-            table_data.append(["Backbone", self.params.get("dl_backbone", "ResNet-101")])
-            table_data.append(["Device", self.params.get("dl_device", "CPU")])
-            table_data.append(["Resolution", self.params.get("dl_resolution", "512x512")])
+            # Features used
+            table_data.append(["", ""])
+            table_data.append(["— FEATURES —", ""])
+            table_data.append(["GLCM", "Yes" if self.params.get("use_glcm", True) else "No"])
+            table_data.append(["LBP", "Yes" if self.params.get("use_lbp", True) else "No"])
+            table_data.append(["Gabor", "Yes" if self.params.get("use_gabor", False) else "No"])
             
         table = Table(table_data, colWidths=[2.5*inch, 3*inch])
         table.setStyle(TableStyle([
