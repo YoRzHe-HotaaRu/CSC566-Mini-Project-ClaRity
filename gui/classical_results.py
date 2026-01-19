@@ -17,27 +17,64 @@ from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
 
 
-def numpy_to_qpixmap(image: np.ndarray, max_size: int = 200) -> QPixmap:
-    """Convert numpy array to QPixmap, resized to max_size."""
-    if image is None:
+def numpy_to_qpixmap(image: np.ndarray, target_size: Tuple[int, int] = None) -> QPixmap:
+    """Convert numpy array to QPixmap, optionally resized to target_size."""
+    if image is None or image.size == 0:
         return QPixmap()
     
-    # Convert grayscale to BGR for display
-    if len(image.shape) == 2:
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    # Make a copy to avoid modifying original
+    img = image.copy()
     
-    # Resize while maintaining aspect ratio
-    h, w = image.shape[:2]
-    scale = min(max_size / w, max_size / h)
-    new_w, new_h = int(w * scale), int(h * scale)
-    resized = cv2.resize(image, (new_w, new_h))
+    # Convert grayscale to BGR for display
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    
+    # Resize if target size specified
+    if target_size:
+        h, w = img.shape[:2]
+        target_w, target_h = target_size
+        scale = min(target_w / w, target_h / h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        if new_w > 0 and new_h > 0:
+            img = cv2.resize(img, (new_w, new_h))
     
     # Convert BGR to RGB for Qt
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     h, w, ch = rgb.shape
     bytes_per_line = ch * w
-    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+    qimg = QImage(rgb.data.tobytes(), w, h, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
+
+
+class ScalableImageLabel(QLabel):
+    """A QLabel that stores original image and scales it on resize."""
+    
+    def __init__(self, image: np.ndarray = None, parent=None):
+        super().__init__(parent)
+        self.original_image = image
+        self.setMinimumSize(100, 100)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background-color: #1a1a2e; border: 1px solid #444;")
+        if image is not None:
+            self._update_pixmap()
+    
+    def setImage(self, image: np.ndarray):
+        """Set the image to display."""
+        self.original_image = image
+        self._update_pixmap()
+    
+    def _update_pixmap(self):
+        """Update the pixmap based on current size."""
+        if self.original_image is None:
+            return
+        size = self.size()
+        pixmap = numpy_to_qpixmap(self.original_image, (size.width() - 10, size.height() - 10))
+        self.setPixmap(pixmap)
+    
+    def resizeEvent(self, event):
+        """Handle resize by updating pixmap."""
+        super().resizeEvent(event)
+        self._update_pixmap()
 
 
 class ImageSegmentationResultsDialog(QDialog):
@@ -69,7 +106,7 @@ class ImageSegmentationResultsDialog(QDialog):
         self.setup_ui()
     
     def setup_ui(self):
-        """Setup the UI layout."""
+        """Setup the UI layout - 3x3 grid with scalable images."""
         layout = QVBoxLayout(self)
         
         # Title
@@ -78,41 +115,42 @@ class ImageSegmentationResultsDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        # Grid for images
+        # Grid for images - 3x3 layout (2 rows of images)
         grid_widget = QWidget()
         grid = QGridLayout(grid_widget)
         grid.setSpacing(10)
         
-        # Column headers
-        headers = [
-            "No.", "Original Image", "Sobel Edge\nDetection", "Dilated Gradient\nMask",
-            "Filled In Holes And\nCleared Border Image", "Erosion Gradient\nMask And Remove\nSmall Region",
-            "Segmented Image"
+        # Image data: (key, label, row, col)
+        image_data = [
+            ('original', "Original Image", 0, 0),
+            ('sobel_edge', "Sobel Edge Detection", 0, 1),
+            ('dilated_gradient', "Dilated Gradient Mask", 0, 2),
+            ('filled_holes', "Filled In Holes And\nCleared Border Image", 1, 0),
+            ('erosion_mask', "Erosion Gradient Mask\nAnd Remove Small Region", 1, 1),
+            ('segmented', "Segmented Image", 1, 2),
         ]
         
-        for col, header in enumerate(headers):
-            lbl = QLabel(header)
-            lbl.setStyleSheet("font-weight: bold; background-color: #333; padding: 5px;")
+        for key, label_text, row, col in image_data:
+            # Container for label + image
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setSpacing(5)
+            container_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # Label
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("font-weight: bold; font-size: 11px;")
             lbl.setAlignment(Qt.AlignCenter)
-            grid.addWidget(lbl, 0, col)
-        
-        # Row 1 with images
-        grid.addWidget(QLabel("1."), 1, 0)
-        
-        image_keys = ['original', 'sobel_edge', 'dilated_gradient', 'filled_holes', 'erosion_mask', 'segmented']
-        for col, key in enumerate(image_keys):
+            container_layout.addWidget(lbl)
+            
+            # Image - use ScalableImageLabel for resize support
             img = self.images.get(key)
-            lbl = QLabel()
-            if img is not None:
-                pixmap = numpy_to_qpixmap(img, max_size=140)
-                lbl.setPixmap(pixmap)
-            else:
-                lbl.setText("N/A")
-            lbl.setAlignment(Qt.AlignCenter)
-            lbl.setStyleSheet("background-color: #1a1a2e; border: 1px solid #444; padding: 5px;")
-            grid.addWidget(lbl, 1, col + 1)
+            img_lbl = ScalableImageLabel(img)
+            container_layout.addWidget(img_lbl, 1)  # stretch factor 1
+            
+            grid.addWidget(container, row, col)
         
-        layout.addWidget(grid_widget)
+        layout.addWidget(grid_widget, 1)  # stretch factor 1
         
         # Close button
         btn_layout = QHBoxLayout()
@@ -170,7 +208,7 @@ class TextureFeatureResultsDialog(QDialog):
         self.setup_ui()
     
     def setup_ui(self):
-        """Setup the UI layout."""
+        """Setup the UI layout - 3x3 grid."""
         layout = QVBoxLayout(self)
         
         # Title
@@ -179,49 +217,61 @@ class TextureFeatureResultsDialog(QDialog):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        # Grid for images
+        # Grid for images - 3x3 layout (2 rows)
         grid_widget = QWidget()
         grid = QGridLayout(grid_widget)
         grid.setSpacing(10)
         
-        # Column headers
-        headers = [
-            "No.", "Original Image", "Binarization", "Segmented Image",
-            "Grayscale Image", "Region of Interest", "Results of Mean,\nStandard Deviation\nand Smoothness"
+        # Image data: (key, label, row, col)
+        image_data = [
+            ('original', "Original Image", 0, 0),
+            ('binarization', "Binarization", 0, 1),
+            ('segmented', "Segmented Image", 0, 2),
+            ('grayscale', "Grayscale Image", 1, 0),
+            ('roi', "Region of Interest", 1, 1),
         ]
         
-        for col, header in enumerate(headers):
-            lbl = QLabel(header)
-            lbl.setStyleSheet("font-weight: bold; background-color: #333; padding: 5px;")
+        for key, label_text, row, col in image_data:
+            # Container for label + image
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setSpacing(5)
+            container_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # Label
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("font-weight: bold; font-size: 11px;")
             lbl.setAlignment(Qt.AlignCenter)
-            grid.addWidget(lbl, 0, col)
-        
-        # Row 1 with images
-        grid.addWidget(QLabel("1."), 1, 0)
-        
-        image_keys = ['original', 'binarization', 'segmented', 'grayscale', 'roi']
-        for col, key in enumerate(image_keys):
+            container_layout.addWidget(lbl)
+            
+            # Image - use ScalableImageLabel for resize support
             img = self.images.get(key)
-            lbl = QLabel()
-            if img is not None:
-                pixmap = numpy_to_qpixmap(img, max_size=140)
-                lbl.setPixmap(pixmap)
-            else:
-                lbl.setText("N/A")
-            lbl.setAlignment(Qt.AlignCenter)
-            lbl.setStyleSheet("background-color: #1a1a2e; border: 1px solid #444; padding: 5px;")
-            grid.addWidget(lbl, 1, col + 1)
+            img_lbl = ScalableImageLabel(img)
+            container_layout.addWidget(img_lbl, 1)  # stretch factor 1
+            
+            grid.addWidget(container, row, col)
         
-        # Stats column
+        # Stats panel (row 1, col 2)
+        stats_container = QWidget()
+        stats_layout = QVBoxLayout(stats_container)
+        stats_layout.setSpacing(5)
+        stats_layout.setContentsMargins(5, 5, 5, 5)
+        
+        stats_title = QLabel("Results of Mean,\nStandard Deviation\nand Smoothness")
+        stats_title.setStyleSheet("font-weight: bold; font-size: 11px;")
+        stats_title.setAlignment(Qt.AlignCenter)
+        stats_layout.addWidget(stats_title)
+        
         stats_text = f"""Mean: {self.stats.get('mean', 0):.4f}
-Standard Deviation:
-{self.stats.get('std', 0):.4f}
+Standard Deviation: {self.stats.get('std', 0):.4f}
 Smoothness: {self.stats.get('smoothness', 0):.4f}"""
         
         stats_lbl = QLabel(stats_text)
-        stats_lbl.setStyleSheet("background-color: #1a1a2e; border: 1px solid #444; padding: 10px;")
+        stats_lbl.setStyleSheet("background-color: #1a1a2e; border: 1px solid #444; padding: 15px; font-size: 12px;")
         stats_lbl.setAlignment(Qt.AlignCenter)
-        grid.addWidget(stats_lbl, 1, 6)
+        stats_layout.addWidget(stats_lbl)
+        
+        grid.addWidget(stats_container, 1, 2)
         
         layout.addWidget(grid_widget)
         
@@ -276,33 +326,35 @@ def generate_segmentation_steps(image: np.ndarray) -> Dict[str, np.ndarray]:
     dilated = cv2.dilate(sobel, kernel_small, iterations=2)
     results['dilated_gradient'] = dilated
     
-    # 3. Filled Holes and Cleared Border using morphological closing
-    _, thresh = cv2.threshold(dilated, 25, 255, cv2.THRESH_BINARY)
+    # 3. Filled Holes and Cleared Border
+    # Use Otsu threshold on GRAYSCALE (not edges) for intensity-based segmentation
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     # Use morphological closing to fill holes
-    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_large, iterations=3)
+    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_large, iterations=3)
+    # Use morphological opening to remove noise
+    opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_small, iterations=2)
     # Clear border by setting edge pixels to 0
-    border = 10
-    cleared = closed.copy()
+    border = 5
+    cleared = opened.copy()
     cleared[:border, :] = 0
     cleared[-border:, :] = 0
     cleared[:, :border] = 0
     cleared[:, -border:] = 0
     results['filled_holes'] = cleared
     
-    # 4. Erosion Gradient Mask and Remove Small Regions
-    eroded = cv2.erode(cleared, kernel_small, iterations=2)
-    # Remove small regions using connected components
+    # 4. Erosion Gradient Mask - gentle erosion
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    eroded = cv2.erode(cleared, kernel_erode, iterations=1)
+    results['erosion_mask'] = eroded
+    
+    # 5. Segmented Image - remove small noise regions
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(eroded, connectivity=8)
     min_area = max(100, eroded.size * 0.001)  # At least 0.1% of image or 100 pixels
     clean = np.zeros_like(eroded)
     for i in range(1, num_labels):
         if stats[i, cv2.CC_STAT_AREA] >= min_area:
             clean[labels == i] = 255
-    results['erosion_mask'] = clean
-    
-    # 5. Segmented Image - apply mask to original (like Table 2 style)
-    segmented = cv2.bitwise_and(image, image, mask=clean)
-    results['segmented'] = segmented
+    results['segmented'] = clean
     
     return results
 
