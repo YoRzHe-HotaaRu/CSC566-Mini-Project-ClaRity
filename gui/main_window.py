@@ -805,13 +805,13 @@ class MainWindow(QMainWindow):
         images_layout = QHBoxLayout()
         
         # Original image
-        original_group = QGroupBox("Original Image")
-        original_layout = QVBoxLayout(original_group)
+        self.original_group = QGroupBox("Original Image")
+        original_layout = QVBoxLayout(self.original_group)
         self.original_label = ImageLabel()
         # Connect drag-drop signal (Bug 2 fix)
         self.original_label.imageDropped.connect(self.load_image_from_path)
         original_layout.addWidget(self.original_label)
-        images_layout.addWidget(original_group)
+        images_layout.addWidget(self.original_group)
         
         # Result image
         result_group = QGroupBox("Segmentation Result")
@@ -1315,21 +1315,6 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Sub-mode selection (Load Image / Live Preview)
-        submode_group = QGroupBox("Input Mode")
-        submode_layout = QHBoxLayout(submode_group)
-        
-        self.yolo_load_image = QRadioButton("📁 Load Image")
-        self.yolo_load_image.setChecked(True)
-        self.yolo_live_preview = QRadioButton("🎥 Live Preview")
-        
-        submode_layout.addWidget(self.yolo_load_image)
-        submode_layout.addWidget(self.yolo_live_preview)
-        layout.addWidget(submode_group)
-        
-        # Connect sub-mode changes
-        self.yolo_live_preview.toggled.connect(self.toggle_yolo_live_mode)
-        
         # Inference settings
         inference_group = QGroupBox("Inference Settings")
         inference_layout = QGridLayout(inference_group)
@@ -1408,27 +1393,50 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(display_group)
         
-        # Live preview controls (initially hidden)
+        # Live preview controls (contains mode toggle + control buttons)
         self.live_controls_group = QGroupBox("Live Preview Controls")
-        live_layout = QHBoxLayout(self.live_controls_group)
+        live_main_layout = QVBoxLayout(self.live_controls_group)
+        
+        # Mode toggle row (Load Image / Live Preview)
+        mode_row = QHBoxLayout()
+        self.yolo_load_image = QRadioButton("📁 Load Image")
+        self.yolo_load_image.setChecked(True)
+        self.yolo_live_preview = QRadioButton("🎥 Live Preview")
+        mode_row.addWidget(self.yolo_load_image)
+        mode_row.addWidget(self.yolo_live_preview)
+        mode_row.addStretch()
+        live_main_layout.addLayout(mode_row)
+        
+        # Control buttons row (hidden until Live Preview is selected)
+        self.live_buttons_widget = QWidget()
+        live_layout = QHBoxLayout(self.live_buttons_widget)
+        live_layout.setContentsMargins(0, 5, 0, 0)
         
         self.live_start_btn = QPushButton("▶ Start")
         self.live_stop_btn = QPushButton("■ Stop")
         self.live_stop_btn.setEnabled(False)
+        self.live_analyze_btn = QPushButton("📊 Analyze")
+        self.live_analyze_btn.setEnabled(False)
+        self.live_analyze_btn.setStyleSheet("background-color: #2196F3; color: white;")
         self.fps_label = QLabel("FPS: --")
         self.fps_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
         
         live_layout.addWidget(self.live_start_btn)
         live_layout.addWidget(self.live_stop_btn)
+        live_layout.addWidget(self.live_analyze_btn)
         live_layout.addStretch()
         live_layout.addWidget(self.fps_label)
         
-        self.live_controls_group.setVisible(False)  # Hidden by default
+        self.live_buttons_widget.setVisible(False)  # Hidden by default
+        live_main_layout.addWidget(self.live_buttons_widget)
+        
         layout.addWidget(self.live_controls_group)
         
-        # Connect live preview buttons
+        # Connect mode toggle and live preview buttons
+        self.yolo_live_preview.toggled.connect(self.toggle_yolo_live_mode)
         self.live_start_btn.clicked.connect(self.start_live_preview)
         self.live_stop_btn.clicked.connect(self.stop_live_preview)
+        self.live_analyze_btn.clicked.connect(self.analyze_live_frame)
         
         # Info text
         info_label = QLabel(
@@ -1444,10 +1452,15 @@ class MainWindow(QMainWindow):
     
     def toggle_yolo_live_mode(self, is_live: bool):
         """Toggle between Load Image and Live Preview modes."""
-        self.live_controls_group.setVisible(is_live)
+        # Show/hide the control buttons (mode toggle always visible in Live Preview Controls group)
+        self.live_buttons_widget.setVisible(is_live)
+        
+        # Hide/show Original Image panel for full-width Segmentation Result
+        self.original_group.setVisible(not is_live)
+        
         if is_live:
             self.status_bar.showMessage("Live Preview mode - Click 'Start' to begin window capture")
-            # Hide load image and analyze buttons, enable live controls
+            # Hide load image and analyze buttons
             self.load_btn.setVisible(False)
             self.analyze_btn.setVisible(False)
         else:
@@ -1482,15 +1495,28 @@ class MainWindow(QMainWindow):
             self.live_yolo_analyzer.set_confidence(self.yolo_confidence.value() / 100.0)
             self.live_yolo_analyzer.set_iou_threshold(self.yolo_iou.value() / 100.0)
             
-            # Store preprocess options
-            self.live_preprocess_opts = {
+            # Store preprocess and display options
+            preprocess_opts = {
                 "sharpen": self.yolo_sharpen.isChecked(),
                 "edge_detection": self.yolo_edge.isChecked(),
                 "contrast_enhance": self.yolo_contrast.isChecked()
             }
+            display_opts = {
+                "show_masks": self.yolo_show_masks.isChecked(),
+                "show_labels": self.yolo_show_labels.isChecked(),
+                "show_confidence": self.yolo_show_conf.isChecked(),
+                "mask_opacity": self.yolo_opacity.value() / 100.0
+            }
             
-            # Start capture thread
-            self.live_capture_thread = WindowCaptureThread(selected_window.hwnd, target_fps=30)
+            # Create YOLO inference worker (async processing to prevent UI lag)
+            from gui.window_capture import YOLOInferenceWorker
+            self.live_yolo_worker = YOLOInferenceWorker(self.live_yolo_analyzer)
+            self.live_yolo_worker.set_options(preprocess_opts, display_opts)
+            self.live_yolo_worker.result_ready.connect(self._on_yolo_result)
+            self.live_yolo_worker.start()
+            
+            # Start capture thread (22 FPS for performance)
+            self.live_capture_thread = WindowCaptureThread(selected_window.hwnd, target_fps=22)
             self.live_capture_thread.frame_ready.connect(self._on_live_frame)
             self.live_capture_thread.fps_updated.connect(self._on_fps_update)
             self.live_capture_thread.error.connect(self._on_capture_error)
@@ -1499,46 +1525,33 @@ class MainWindow(QMainWindow):
             # Update UI
             self.live_start_btn.setEnabled(False)
             self.live_stop_btn.setEnabled(True)
+            self.live_analyze_btn.setEnabled(True)
             self.live_window_title = selected_window.title
             self.status_bar.showMessage(f"🔴 Live capture: {selected_window.title[:40]}")
     
     def _on_live_frame(self, frame: np.ndarray):
-        """Process and display live frame with YOLO."""
-        if not hasattr(self, 'live_processing') or not self.live_processing:
-            self.live_processing = True
-            try:
-                # Store original for potential analysis
-                self.live_current_frame = frame.copy()
-                
-                # Run YOLO inference
-                prediction = self.live_yolo_analyzer.predict(frame, self.live_preprocess_opts)
-                self.live_current_prediction = prediction
-                
-                # Create visualization
-                vis_frame = self.live_yolo_analyzer.visualize(
-                    prediction.get("preprocessed", frame),
-                    prediction,
-                    show_masks=self.yolo_show_masks.isChecked(),
-                    show_labels=self.yolo_show_labels.isChecked(),
-                    show_confidence=self.yolo_show_conf.isChecked(),
-                    mask_opacity=self.yolo_opacity.value() / 100.0
-                )
-                
-                # Display in result panel (left panel shows original, right shows segmented)
-                self.original_label.setImage(frame)
-                self.result_label.setImage(vis_frame)
-                
-            except Exception as e:
-                print(f"Live frame processing error: {e}")
-            finally:
-                self.live_processing = False
+        """Pass frame to YOLO worker for async processing (no UI lag)."""
+        # Store frame for potential analysis
+        self.live_current_frame = frame.copy()
+        
+        # Pass frame to async YOLO worker (doesn't block main thread)
+        if hasattr(self, 'live_yolo_worker') and self.live_yolo_worker:
+            self.live_yolo_worker.process_frame(frame)
+    
+    def _on_yolo_result(self, vis_frame: np.ndarray, prediction: dict):
+        """Handle YOLO inference result from worker thread."""
+        # Store prediction for analysis
+        self.live_current_prediction = prediction
+        
+        # Display segmentation result (single display mode for live preview)
+        self.result_label.setImage(vis_frame)
     
     def _on_fps_update(self, fps: float):
         """Update FPS display."""
         self.fps_label.setText(f"FPS: {fps:.1f}")
-        if fps >= 25:
+        if fps >= 18:
             self.fps_label.setStyleSheet("font-weight: bold; color: #4CAF50;")  # Green
-        elif fps >= 15:
+        elif fps >= 12:
             self.fps_label.setStyleSheet("font-weight: bold; color: #FFC107;")  # Yellow
         else:
             self.fps_label.setStyleSheet("font-weight: bold; color: #f44336;")  # Red
@@ -1550,16 +1563,64 @@ class MainWindow(QMainWindow):
     
     def stop_live_preview(self):
         """Stop live preview capture."""
+        # Stop YOLO inference worker
+        if hasattr(self, 'live_yolo_worker') and self.live_yolo_worker:
+            self.live_yolo_worker.stop()
+            self.live_yolo_worker = None
+        
+        # Stop capture thread
         if hasattr(self, 'live_capture_thread') and self.live_capture_thread:
             self.live_capture_thread.stop()
             self.live_capture_thread = None
         
         self.live_start_btn.setEnabled(True)
         self.live_stop_btn.setEnabled(False)
+        self.live_analyze_btn.setEnabled(False)
         self.fps_label.setText("FPS: --")
         self.fps_label.setStyleSheet("font-weight: bold; color: #888;")
         self.status_bar.showMessage("Live preview stopped")
-        self.live_processing = False
+    
+    def analyze_live_frame(self):
+        """Capture and analyze current live frame - opens comparison dialog."""
+        from gui.window_capture import LiveAnalysisDialog
+        if not hasattr(self, 'live_current_frame') or self.live_current_frame is None:
+            QMessageBox.warning(self, "No Frame", "No live frame available to analyze.")
+            return
+        
+        if not hasattr(self, 'live_current_prediction') or self.live_current_prediction is None:
+            QMessageBox.warning(self, "No Prediction", "No YOLO prediction available.")
+            return
+        
+        # Pause live preview while showing dialog
+        if hasattr(self, 'live_capture_thread') and self.live_capture_thread:
+            self.live_capture_thread.pause()
+        
+        # Create visualization for the captured frame
+        original_frame = self.live_current_frame.copy()
+        prediction = self.live_current_prediction
+        
+        vis_frame = self.live_yolo_analyzer.visualize(
+            prediction.get("preprocessed", original_frame),
+            prediction,
+            show_masks=self.yolo_show_masks.isChecked(),
+            show_labels=self.yolo_show_labels.isChecked(),
+            show_confidence=self.yolo_show_conf.isChecked(),
+            mask_opacity=self.yolo_opacity.value() / 100.0
+        )
+        
+        # Show comparison dialog
+        dialog = LiveAnalysisDialog(
+            original_frame, 
+            vis_frame, 
+            prediction, 
+            self.get_parameters(),
+            parent=self
+        )
+        dialog.exec_()
+        
+        # Resume live preview
+        if hasattr(self, 'live_capture_thread') and self.live_capture_thread:
+            self.live_capture_thread.resume()
     
     def create_preprocessing_params(self) -> QWidget:
         """Create preprocessing parameters widget."""

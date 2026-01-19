@@ -303,28 +303,87 @@ class ReportGenerator:
         
         classification = self.result.get("classification", {})
         
-        # Main result
-        layer_name = classification.get("layer_name", "Unknown")
-        confidence = classification.get("confidence", 0)
-        material = classification.get("material", "N/A")
-        method = classification.get("method", self.mode)
-        
-        self.elements.append(Paragraph(
-            f"<b>Identified Layer:</b> {layer_name}",
-            self.styles['ReportBody']
-        ))
-        self.elements.append(Paragraph(
-            f"<b>Confidence:</b> {confidence:.1%}",
-            self.styles['ReportBody']
-        ))
-        self.elements.append(Paragraph(
-            f"<b>Material Type:</b> {material}",
-            self.styles['ReportBody']
-        ))
-        self.elements.append(Paragraph(
-            f"<b>Analysis Method:</b> {method}",
-            self.styles['ReportBody']
-        ))
+        # YOLO mode: show ALL detected layers
+        if self.mode == "yolo":
+            detections = self.result.get("detections", [])
+            
+            if detections:
+                # Group detections by layer
+                layer_groups = {}
+                for det in detections:
+                    layer_num = det.get("layer_number", 0)
+                    if layer_num not in layer_groups:
+                        layer_groups[layer_num] = []
+                    layer_groups[layer_num].append(det)
+                
+                self.elements.append(Paragraph(
+                    f"<b>Analysis Method:</b> YOLOv11 Instance Segmentation",
+                    self.styles['ReportBody']
+                ))
+                self.elements.append(Paragraph(
+                    f"<b>Total Detections:</b> {len(detections)} instances across {len(layer_groups)} layer type(s)",
+                    self.styles['ReportBody']
+                ))
+                self.elements.append(Spacer(1, 10))
+                
+                # Create table for all detected layers
+                table_data = [["Layer", "Instances", "Avg Confidence", "Material"]]
+                
+                for layer_num in sorted(layer_groups.keys()):
+                    layer_dets = layer_groups[layer_num]
+                    layer_info = ROAD_LAYERS.get(int(layer_num), {})
+                    layer_name = layer_info.get("name", f"Layer {layer_num}")
+                    material = layer_info.get("material", "Unknown")
+                    avg_conf = sum(d.get("confidence", 0) for d in layer_dets) / len(layer_dets)
+                    
+                    table_data.append([
+                        f"L{layer_num}: {layer_name}",
+                        str(len(layer_dets)),
+                        f"{avg_conf:.1%}",
+                        material
+                    ])
+                
+                table = Table(table_data, colWidths=[2.2*inch, 0.8*inch, 1.1*inch, 2.1*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['primary_green']),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), self.COLORS['light_gray']),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.white),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, self.COLORS['light_gray']]),
+                ]))
+                self.elements.append(table)
+            else:
+                self.elements.append(Paragraph(
+                    "No road layers detected in this image.",
+                    self.styles['ReportBody']
+                ))
+        else:
+            # Standard mode: show single layer result
+            layer_name = classification.get("layer_name", "Unknown")
+            confidence = classification.get("confidence", 0)
+            material = classification.get("material", "N/A")
+            method = classification.get("method", self.mode)
+            
+            self.elements.append(Paragraph(
+                f"<b>Identified Layer:</b> {layer_name}",
+                self.styles['ReportBody']
+            ))
+            self.elements.append(Paragraph(
+                f"<b>Confidence:</b> {confidence:.1%}",
+                self.styles['ReportBody']
+            ))
+            self.elements.append(Paragraph(
+                f"<b>Material Type:</b> {material}",
+                self.styles['ReportBody']
+            ))
+            self.elements.append(Paragraph(
+                f"<b>Analysis Method:</b> {method}",
+                self.styles['ReportBody']
+            ))
         
         # Layer distribution table (if available)
         layer_dist = self.result.get("layer_distribution", {})
@@ -337,9 +396,13 @@ class ReportGenerator:
                 self.styles['SubHeading']
             ))
             
-            # Calculate distribution from labels
+            # Calculate distribution from labels (filter out layer 0 - background)
             unique, counts = np.unique(labels, return_counts=True)
-            total = labels.size
+            # Filter out background (layer 0)
+            mask = unique > 0
+            unique = unique[mask]
+            counts = counts[mask]
+            total = counts.sum() if len(counts) > 0 else 1
             
             table_data = [["Layer", "Coverage", "Material"]]
             for layer_num, count in zip(unique, counts):
@@ -426,7 +489,8 @@ class ReportGenerator:
             "classical": "Classical (Texture Analysis)",
             "vlm": "VLM (GLM-4.6V AI Vision)",
             "deep_learning": "Deep Learning (CNN Classifier)",
-            "hybrid": "Hybrid (Classical + AI)"
+            "hybrid": "Hybrid (Classical + AI)",
+            "yolo": "YOLOv11 (Instance Segmentation)"
         }
         
         # Create settings table
@@ -522,6 +586,42 @@ class ReportGenerator:
             table_data.append(["LBP", "Yes" if self.params.get("use_lbp", True) else "No"])
             table_data.append(["Gabor", "Yes" if self.params.get("use_gabor", False) else "No"])
             
+        elif self.mode == "yolo":
+            # YOLO Instance Segmentation settings
+            table_data.append(["", ""])
+            table_data.append(["— INFERENCE SETTINGS —", ""])
+            table_data.append(["Confidence Threshold", f"{self.params.get('yolo_confidence', 0.5):.0%}"])
+            table_data.append(["IoU Threshold", f"{self.params.get('yolo_iou', 0.45):.0%}"])
+            table_data.append(["Device", self.params.get("yolo_device", "cuda (GPU)")])
+            
+            # Preprocessing settings
+            table_data.append(["", ""])
+            table_data.append(["— PREPROCESSING —", ""])
+            table_data.append(["Sharpen Image", "Yes" if self.params.get("yolo_sharpen", False) else "No"])
+            table_data.append(["Edge Detection Overlay", "Yes" if self.params.get("yolo_edge", False) else "No"])
+            table_data.append(["Contrast Enhancement", "Yes" if self.params.get("yolo_contrast", False) else "No"])
+            
+            # Display settings
+            table_data.append(["", ""])
+            table_data.append(["— DISPLAY OPTIONS —", ""])
+            table_data.append(["Show Masks", "Yes" if self.params.get("yolo_show_masks", True) else "No"])
+            table_data.append(["Show Labels", "Yes" if self.params.get("yolo_show_labels", True) else "No"])
+            table_data.append(["Show Confidence", "Yes" if self.params.get("yolo_show_conf", True) else "No"])
+            table_data.append(["Mask Opacity", f"{self.params.get('yolo_opacity', 0.4):.0%}"])
+            
+            # Detection summary
+            detections = self.result.get("detections", [])
+            table_data.append(["", ""])
+            table_data.append(["— DETECTION SUMMARY —", ""])
+            table_data.append(["Total Detections", str(len(detections))])
+            
+            # Count layers detected
+            layer_counts = {}
+            for det in detections:
+                layer_num = det.get("layer_number", 0)
+                layer_counts[layer_num] = layer_counts.get(layer_num, 0) + 1
+            table_data.append(["Layer Types Detected", str(len(layer_counts))])
+            
         table = Table(table_data, colWidths=[2.5*inch, 3*inch])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), self.COLORS['dark']),
@@ -546,18 +646,38 @@ class ReportGenerator:
             self.styles['SectionHeading']
         ))
         
-        # Calculate distribution
+        # Calculate distribution (filter out background layer 0)
         unique, counts = np.unique(labels_array, return_counts=True)
+        # Filter out background (layer 0)
+        mask = unique > 0
+        unique = unique[mask]
+        counts = counts[mask]
+        
+        if len(unique) == 0:
+            return  # No layers to show
         
         # Create pie chart
         fig, ax = plt.subplots(figsize=(5, 4))
+        
+        # Updated vibrant colors for YOLO mode
+        YOLO_COLORS = {
+            1: '#8B3C1E',  # Deep Brown - Subgrade
+            2: '#32B432',  # Green - Subbase
+            3: '#1464B4',  # Blue - Base Course
+            4: '#B432B4',  # Purple - Binder Course
+            5: '#DC8C1E'   # Orange - Surface Course
+        }
         
         layer_names = []
         layer_colors = []
         for layer_num in unique:
             info = ROAD_LAYERS.get(int(layer_num), {})
             layer_names.append(info.get("name", f"Layer {layer_num}"))
-            hex_color = info.get("hex_color", "#888888")
+            # Use YOLO colors for YOLO mode, otherwise use config colors
+            if self.mode == "yolo":
+                hex_color = YOLO_COLORS.get(int(layer_num), "#888888")
+            else:
+                hex_color = info.get("hex_color", "#888888")
             layer_colors.append(hex_color)
         
         percentages = counts / counts.sum() * 100
@@ -625,43 +745,104 @@ class ReportGenerator:
         # Generate discussion based on results
         discussion = []
         
-        discussion.append(
-            f"The analysis identified the primary road layer as <b>{layer_name}</b> "
-            f"with a confidence level of <b>{confidence:.1%}</b>. "
-        )
-        
-        if confidence >= 0.8:
-            discussion.append(
-                "This high confidence suggests the texture patterns and visual characteristics "
-                "closely match the expected properties of this layer type."
-            )
-        elif confidence >= 0.5:
-            discussion.append(
-                "The moderate confidence level indicates some ambiguity in the classification, "
-                "which may be due to transitional zones, mixed materials, or image quality factors."
-            )
-        else:
-            discussion.append(
-                "The lower confidence suggests the image may contain mixed layers, unusual textures, "
-                "or may benefit from additional analysis modes for verification."
-            )
-        
-        if material and material != "N/A":
-            discussion.append(
-                f" The identified material type is <b>{material}</b>, "
-                "which is consistent with standard road construction specifications."
-            )
-        
-        # Mode-specific discussion
-        if self.mode == "hybrid":
-            classical_res = self.result.get("classical_result", {})
-            vlm_res = self.result.get("vlm_result", {})
-            if classical_res and vlm_res:
+        # YOLO mode: multi-layer discussion
+        if self.mode == "yolo":
+            detections = self.result.get("detections", [])
+            
+            if detections:
+                # Group by layer
+                layer_groups = {}
+                for det in detections:
+                    layer_num = det.get("layer_number", 0)
+                    if layer_num not in layer_groups:
+                        layer_groups[layer_num] = []
+                    layer_groups[layer_num].append(det)
+                
                 discussion.append(
-                    f"<br/><br/>The hybrid analysis combined classical texture analysis "
-                    f"(identified: {classical_res.get('layer_name', 'N/A')}, {classical_res.get('confidence', 0):.0%}) "
-                    f"with AI vision analysis (identified: {vlm_res.get('layer_name', 'N/A')}, {vlm_res.get('confidence', 0):.0%})."
+                    f"The YOLOv11 instance segmentation analysis identified <b>{len(detections)} instances</b> "
+                    f"across <b>{len(layer_groups)} distinct road layer types</b>. "
                 )
+                
+                # Describe each layer
+                layer_descriptions = []
+                for layer_num in sorted(layer_groups.keys()):
+                    layer_dets = layer_groups[layer_num]
+                    layer_info = ROAD_LAYERS.get(int(layer_num), {})
+                    layer_name = layer_info.get("name", f"Layer {layer_num}")
+                    material = layer_info.get("material", "Unknown")
+                    avg_conf = sum(d.get("confidence", 0) for d in layer_dets) / len(layer_dets)
+                    
+                    layer_descriptions.append(
+                        f"<b>{layer_name}</b> ({len(layer_dets)} instance(s), {avg_conf:.0%} confidence, material: {material})"
+                    )
+                
+                discussion.append(
+                    "<br/><br/>The detected layers include: " + "; ".join(layer_descriptions) + ". "
+                )
+                
+                # Overall confidence assessment
+                all_confs = [d.get("confidence", 0) for d in detections]
+                avg_overall = sum(all_confs) / len(all_confs)
+                
+                if avg_overall >= 0.8:
+                    discussion.append(
+                        f"<br/><br/>The overall average confidence of <b>{avg_overall:.0%}</b> indicates high reliability "
+                        "in the segmentation results. The model clearly identified distinct layer boundaries."
+                    )
+                elif avg_overall >= 0.5:
+                    discussion.append(
+                        f"<br/><br/>The overall average confidence of <b>{avg_overall:.0%}</b> suggests moderate reliability. "
+                        "Some regions may have overlapping characteristics or transitional zones between layers."
+                    )
+                else:
+                    discussion.append(
+                        f"<br/><br/>The lower overall confidence of <b>{avg_overall:.0%}</b> suggests image quality "
+                        "or unusual layer formations may be affecting detection accuracy."
+                    )
+            else:
+                discussion.append(
+                    "No road layers were detected in this image. This may indicate the image does not contain "
+                    "visible road construction layers, or the confidence threshold may need adjustment."
+                )
+        else:
+            # Standard single-layer discussion
+            discussion.append(
+                f"The analysis identified the primary road layer as <b>{layer_name}</b> "
+                f"with a confidence level of <b>{confidence:.1%}</b>. "
+            )
+            
+            if confidence >= 0.8:
+                discussion.append(
+                    "This high confidence suggests the texture patterns and visual characteristics "
+                    "closely match the expected properties of this layer type."
+                )
+            elif confidence >= 0.5:
+                discussion.append(
+                    "The moderate confidence level indicates some ambiguity in the classification, "
+                    "which may be due to transitional zones, mixed materials, or image quality factors."
+                )
+            else:
+                discussion.append(
+                    "The lower confidence suggests the image may contain mixed layers, unusual textures, "
+                    "or may benefit from additional analysis modes for verification."
+                )
+            
+            if material and material != "N/A":
+                discussion.append(
+                    f" The identified material type is <b>{material}</b>, "
+                    "which is consistent with standard road construction specifications."
+                )
+            
+            # Mode-specific discussion
+            if self.mode == "hybrid":
+                classical_res = self.result.get("classical_result", {})
+                vlm_res = self.result.get("vlm_result", {})
+                if classical_res and vlm_res:
+                    discussion.append(
+                        f"<br/><br/>The hybrid analysis combined classical texture analysis "
+                        f"(identified: {classical_res.get('layer_name', 'N/A')}, {classical_res.get('confidence', 0):.0%}) "
+                        f"with AI vision analysis (identified: {vlm_res.get('layer_name', 'N/A')}, {vlm_res.get('confidence', 0):.0%})."
+                    )
         
         self.elements.append(Paragraph(
             " ".join(discussion),
