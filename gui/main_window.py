@@ -565,9 +565,12 @@ class AnalysisWorker(QThread):
                     
                     self.progress.emit(80, "Creating visualization...")
                     
+                    # Use preprocessed image for visualization
+                    vis_image = prediction.get("preprocessed", self.image)
+                    
                     # Create visualization
                     visualization = analyzer.visualize(
-                        self.image,
+                        vis_image,
                         prediction,
                         show_masks=self.params.get("yolo_show_masks", True),
                         show_labels=self.params.get("yolo_show_labels", True),
@@ -866,29 +869,54 @@ class MainWindow(QMainWindow):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
-        # Analysis mode selection
+        # Analysis mode selection - Styled button grid (2 columns)
         mode_group = QGroupBox("Analysis Mode")
-        mode_layout = QVBoxLayout(mode_group)
+        mode_grid = QGridLayout(mode_group)
+        mode_grid.setSpacing(5)
         
-        self.mode_classical = QRadioButton("Classical (Texture-based)")
-        self.mode_classical.setChecked(True)
-        self.mode_dl = QRadioButton("Deep Learning (CNN Classifier)")
-        self.mode_vlm = QRadioButton("VLM Analysis (GLM-4.6V)")
-        self.mode_hybrid = QRadioButton("Hybrid (Classical + AI)")
-        self.mode_yolo = QRadioButton("YOLOv11 (Instance Segmentation)")
+        # Button style for mode selection
+        mode_btn_style = """
+            QPushButton {
+                padding: 10px 5px;
+                border: 2px solid #444;
+                border-radius: 8px;
+                background-color: #2a2a3a;
+                color: #aaa;
+                font-size: 10px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                border-color: #666;
+                background-color: #3a3a4a;
+            }
+            QPushButton:checked {
+                border-color: #4CAF50;
+                background-color: #1a3a2a;
+                color: white;
+                font-weight: bold;
+            }
+        """
         
-        mode_layout.addWidget(self.mode_classical)
-        mode_layout.addWidget(self.mode_dl)
-        mode_layout.addWidget(self.mode_vlm)
-        mode_layout.addWidget(self.mode_hybrid)
-        mode_layout.addWidget(self.mode_yolo)
+        self.mode_buttons = {}
+        modes = [
+            ("classical", "📊 Classical", 0, 0),
+            ("deep_learning", "🧠 CNN", 0, 1),
+            ("vlm", "🔍 VLM", 1, 0),
+            ("hybrid", "⚡ Hybrid", 1, 1),
+            ("yolo", "🎯 YOLOv11", 2, 0)
+        ]
         
-        # Connect mode buttons to dynamic panel switching
-        self.mode_classical.toggled.connect(lambda: self.switch_mode_panel("classical"))
-        self.mode_dl.toggled.connect(lambda: self.switch_mode_panel("deep_learning"))
-        self.mode_vlm.toggled.connect(lambda: self.switch_mode_panel("vlm"))
-        self.mode_hybrid.toggled.connect(lambda: self.switch_mode_panel("hybrid"))
-        self.mode_yolo.toggled.connect(lambda: self.switch_mode_panel("yolo"))
+        for mode_id, label, row, col in modes:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setStyleSheet(mode_btn_style)
+            btn.clicked.connect(lambda checked, m=mode_id: self.select_mode(m))
+            mode_grid.addWidget(btn, row, col)
+            self.mode_buttons[mode_id] = btn
+        
+        # Set Classical as default
+        self.mode_buttons["classical"].setChecked(True)
+        self.current_mode = "classical"
         
         layout.addWidget(mode_group)
         
@@ -963,6 +991,15 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         
         return panel
+    
+    def select_mode(self, mode: str):
+        """Handle mode button selection - exclusive toggle with panel switch."""
+        # Uncheck all other buttons
+        for mode_id, btn in self.mode_buttons.items():
+            btn.setChecked(mode_id == mode)
+        
+        self.current_mode = mode
+        self.switch_mode_panel(mode)
     
     def switch_mode_panel(self, mode: str):
         """Switch parameter panel based on selected analysis mode."""
@@ -1640,16 +1677,7 @@ class MainWindow(QMainWindow):
     
     def get_current_mode(self) -> str:
         """Get currently selected analysis mode."""
-        if self.mode_classical.isChecked():
-            return "classical"
-        elif self.mode_dl.isChecked():
-            return "deep_learning"
-        elif self.mode_vlm.isChecked():
-            return "vlm"
-        elif self.mode_yolo.isChecked():
-            return "yolo"
-        else:
-            return "hybrid"
+        return getattr(self, 'current_mode', 'classical')
     
     def get_parameters(self) -> dict:
         """Get current parameter values for ALL analysis modes."""
@@ -1779,6 +1807,67 @@ class MainWindow(QMainWindow):
         
         text = "═══ ANALYSIS RESULTS ═══\n\n"
         
+        # YOLO-specific: Show ALL detected layers
+        if self.mode == "yolo" and "detections" in result:
+            detections = result.get("detections", [])
+            num_detections = len(detections)
+            
+            text += f"🎯 YOLOv11 Instance Segmentation\n"
+            text += f"📊 Total Detections: {num_detections}\n"
+            text += f"⚙️  Device: {'CUDA (GPU)' if self.yolo_device.currentText().startswith('CUDA') else 'CPU'}\n\n"
+            
+            if num_detections == 0:
+                text += "⚠️ No road layers detected in this image.\n"
+                text += "   Try lowering the confidence threshold.\n"
+            else:
+                # Group detections by layer
+                from src.config import ROAD_LAYERS
+                layer_groups = {}
+                for det in detections:
+                    layer_num = det["layer_number"]
+                    if layer_num not in layer_groups:
+                        layer_groups[layer_num] = []
+                    layer_groups[layer_num].append(det)
+                
+                text += "─── Detected Layers ───\n\n"
+                
+                # Sort by layer number
+                for layer_num in sorted(layer_groups.keys()):
+                    layer_dets = layer_groups[layer_num]
+                    layer_info = ROAD_LAYERS.get(layer_num, {})
+                    layer_name = layer_info.get("name", f"Layer {layer_num}")
+                    material = layer_info.get("material", "Unknown")
+                    
+                    # Calculate average confidence and total area
+                    avg_conf = sum(d["confidence"] for d in layer_dets) / len(layer_dets)
+                    total_pixels = sum(d["mask"].sum() for d in layer_dets)
+                    
+                    text += f"🔷 L{layer_num}: {layer_name}\n"
+                    text += f"   ├─ Instances: {len(layer_dets)}\n"
+                    text += f"   ├─ Avg Confidence: {avg_conf:.1%}\n"
+                    text += f"   ├─ Material: {material}\n"
+                    text += f"   └─ Coverage: {total_pixels:,} px\n\n"
+                
+                # Individual detection details
+                text += "─── Detection Details ───\n\n"
+                for i, det in enumerate(detections, 1):
+                    layer_num = det["layer_number"]
+                    layer_info = ROAD_LAYERS.get(layer_num, {})
+                    layer_name = layer_info.get("name", det["class_name"])
+                    
+                    text += f"Detection #{i}:\n"
+                    text += f"   Layer: {layer_name} (L{layer_num})\n"
+                    text += f"   Confidence: {det['confidence']:.1%}\n"
+                    text += f"   Area: {det['mask'].sum():,} pixels\n\n"
+            
+            self.results_text.setText(text)
+            
+            # Generate YOLO summary
+            summary = self._generate_yolo_summary(result)
+            self.summary_text.setText(summary)
+            return
+        
+        # Standard mode handling (Classical, VLM, DL, Hybrid)
         # Check VLM Output Options (only apply to VLM mode)
         is_vlm = self.mode == "vlm"
         show_layer = not is_vlm or self.vlm_layer_check.isChecked()
@@ -1908,6 +1997,51 @@ class MainWindow(QMainWindow):
                         border-radius: 4px;
                     ''')
                     self.legend_items[layer_num].setText(f"■ {layer['name']}")
+
+    def _generate_yolo_summary(self, result: dict) -> str:
+        """Generate detailed plain-English summary for YOLO mode."""
+        detections = result.get("detections", [])
+        num_detections = len(detections)
+        
+        if num_detections == 0:
+            return "🎯 YOLOv11 Analysis Complete\n\nNo road layers were detected in this image. Consider adjusting the confidence threshold or using a different image."
+        
+        from src.config import ROAD_LAYERS
+        
+        # Group by layer
+        layer_groups = {}
+        for det in detections:
+            layer_num = det["layer_number"]
+            if layer_num not in layer_groups:
+                layer_groups[layer_num] = []
+            layer_groups[layer_num].append(det)
+        
+        summary = f"🎯 YOLOv11 Analysis Complete\n\n"
+        summary += f"Detected {num_detections} instance(s) across {len(layer_groups)} layer type(s):\n\n"
+        
+        # Summary by layer
+        for layer_num in sorted(layer_groups.keys()):
+            layer_dets = layer_groups[layer_num]
+            layer_info = ROAD_LAYERS.get(layer_num, {})
+            layer_name = layer_info.get("name", f"Layer {layer_num}")
+            material = layer_info.get("material", "Unknown")
+            avg_conf = sum(d["confidence"] for d in layer_dets) / len(layer_dets)
+            
+            summary += f"• {layer_name}: {len(layer_dets)} instance(s), {avg_conf:.0%} avg confidence\n"
+            summary += f"  Material: {material}\n\n"
+        
+        # Overall confidence assessment
+        all_confs = [d["confidence"] for d in detections]
+        avg_overall = sum(all_confs) / len(all_confs)
+        
+        if avg_overall >= 0.8:
+            summary += f"✅ High confidence analysis (avg {avg_overall:.0%})"
+        elif avg_overall >= 0.5:
+            summary += f"⚡ Moderate confidence analysis (avg {avg_overall:.0%})"
+        else:
+            summary += f"⚠️ Low confidence analysis (avg {avg_overall:.0%}) - results may need verification"
+        
+        return summary
 
     def generate_summary(self, result: dict, classification: dict, 
                          show_material: bool = True, show_texture: bool = True, 

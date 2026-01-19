@@ -24,13 +24,13 @@ class YOLOAnalyzer:
         'layer_surfacecourse': 5
     }
     
-    # Layer colors (BGR format, matching config.py ROAD_LAYERS)
+    # Layer colors (BGR format) - VIBRANT DISTINCT COLORS for YOLO visualization
     LAYER_COLORS = {
-        1: (43, 90, 139),    # Brown - Subgrade
-        2: (128, 128, 128),  # Gray - Subbase
-        3: (169, 169, 169),  # Light Gray - Base
-        4: (70, 70, 70),     # Dark Gray - Binder
-        5: (50, 50, 50)      # Very Dark Gray - Surface
+        1: (30, 60, 139),     # Deep Brown - Subgrade
+        2: (50, 180, 50),     # Green - Subbase
+        3: (180, 100, 20),    # Blue - Base
+        4: (180, 50, 180),    # Purple - Binder
+        5: (30, 140, 220)     # Orange - Surface
     }
     
     def __init__(self, model_path: Optional[str] = None, device: str = "cuda"):
@@ -227,6 +227,8 @@ class YOLOAnalyzer:
             vis = cv2.addWeighted(vis, 1 - mask_opacity, overlay, mask_opacity, 0)
         
         # Draw bounding boxes and labels
+        img_h, img_w = image.shape[:2]
+        
         for det in prediction.get("detections", []):
             if show_labels or show_confidence:
                 x1, y1, x2, y2 = [int(c) for c in det["bbox"]]
@@ -247,10 +249,33 @@ class YOLOAnalyzer:
                 
                 label = " | ".join(label_parts)
                 
-                # Background for text
-                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                cv2.rectangle(vis, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
-                cv2.putText(vis, label, (x1 + 2, y1 - 4), 
+                # Get text size
+                (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                
+                # Calculate label position - clamp to image bounds
+                label_x = x1
+                label_y = y1 - th - 8
+                
+                # If label goes above image, put it inside the box at top
+                if label_y < 0:
+                    label_y = y1 + 2
+                    text_y = y1 + th + 4
+                else:
+                    text_y = y1 - 4
+                    label_y = y1 - th - 8
+                
+                # If label goes beyond right edge, shift it left
+                if label_x + tw + 4 > img_w:
+                    label_x = max(0, img_w - tw - 6)
+                
+                # Clamp x position to not go negative
+                label_x = max(0, label_x)
+                
+                # Draw background rectangle
+                bg_y1 = text_y - th - 4 if label_y >= 0 else y1
+                bg_y2 = text_y + 4 if label_y >= 0 else y1 + th + 8
+                cv2.rectangle(vis, (label_x, bg_y1), (label_x + tw + 4, bg_y2), color, -1)
+                cv2.putText(vis, label, (label_x + 2, text_y), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         return vis
