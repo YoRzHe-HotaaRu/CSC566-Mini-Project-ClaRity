@@ -1995,6 +1995,31 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(value)
         self.status_bar.showMessage(message)
     
+    def _show_classical_result_dialogs(self):
+        """Show Image Segmentation and Texture Feature results dialogs for Classical mode."""
+        from gui.classical_results import (
+            ImageSegmentationResultsDialog, TextureFeatureResultsDialog,
+            generate_segmentation_steps, generate_texture_steps
+        )
+        
+        try:
+            # Generate segmentation intermediate images
+            seg_images = generate_segmentation_steps(self.image)
+            
+            # Generate texture feature intermediate images and stats
+            tex_images, tex_stats = generate_texture_steps(self.image)
+            
+            # Show Image Segmentation Results dialog
+            self.seg_dialog = ImageSegmentationResultsDialog(seg_images, parent=self)
+            self.seg_dialog.show()  # Non-modal so both can be open
+            
+            # Show Texture Feature Extraction Results dialog
+            self.tex_dialog = TextureFeatureResultsDialog(tex_images, tex_stats, parent=self)
+            self.tex_dialog.show()  # Non-modal so both can be open
+            
+        except Exception as e:
+            print(f"Error showing Classical result dialogs: {e}")
+    
     def analysis_complete(self, result: dict):
         """Handle analysis completion."""
         import time
@@ -2031,6 +2056,10 @@ class MainWindow(QMainWindow):
             self.result_label.setImage(colored)
             # Store for PDF export
             self.result["colored_segmentation"] = colored
+        
+        # Show Classical mode result dialogs (Image Segmentation + Texture Feature Extraction)
+        if self.mode == "classical" and self.image is not None:
+            self._show_classical_result_dialogs()
         
         # Update legend
         if "labels" in result:
