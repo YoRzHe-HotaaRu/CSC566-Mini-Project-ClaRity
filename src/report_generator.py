@@ -115,7 +115,7 @@ class ReportGenerator:
             fontSize=9,
             textColor=colors.gray,
             alignment=TA_CENTER,
-            spaceAfter=15
+            spaceAfter=4
         ))
         
         return styles
@@ -189,27 +189,38 @@ class ReportGenerator:
             self.styles['ReportCaption']
         ))
         
-        # Date and time
+        self.elements.append(Spacer(1, 10))
+        
+        # Report metadata table
         now = datetime.now()
-        self.elements.append(Paragraph(
-            f"Report Generated: {now.strftime('%B %d, %Y at %H:%M')}",
-            self.styles['ReportCaption']
-        ))
-        
-        # Source image filename
         source_filename = self.result.get("source_filename", "Unknown")
-        self.elements.append(Paragraph(
-            f"Source Image: {source_filename}",
-            self.styles['ReportCaption']
-        ))
-        
-        # Processing time
         processing_time = self.result.get("processing_time")
+        
+        metadata_data = [
+            ["Report Generated", now.strftime('%B %d, %Y at %H:%M')],
+            ["Source Image", source_filename],
+        ]
+        
         if processing_time:
-            self.elements.append(Paragraph(
-                f"Processing Time: {processing_time:.2f} seconds",
-                self.styles['ReportCaption']
-            ))
+            metadata_data.append(["Processing Time", f"{processing_time:.2f} seconds"])
+        
+        metadata_table = Table(metadata_data, colWidths=[2*inch, 4*inch])
+        metadata_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), self.COLORS['light_gray']),
+            ('TEXTCOLOR', (0, 0), (0, -1), self.COLORS['dark']),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, self.COLORS['primary_blue']),
+        ]))
+        self.elements.append(metadata_table)
+        
+        self.elements.append(Spacer(1, 15))
         
         # Horizontal line
         self.elements.append(HRFlowable(

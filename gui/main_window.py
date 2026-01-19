@@ -532,6 +532,74 @@ class AnalysisWorker(QThread):
                 result["vlm_result"] = vlm_result
                 result["classification"] = final_result
             
+            elif self.mode == "yolo":
+                # ===== YOLOv11 INSTANCE SEGMENTATION MODE =====
+                self.progress.emit(20, "Loading YOLOv11 model...")
+                try:
+                    from src.yolo_analyzer import YOLOAnalyzer
+                    
+                    # Initialize analyzer with user settings
+                    analyzer = YOLOAnalyzer(device=self.params.get("yolo_device", "cuda"))
+                    analyzer.set_confidence(self.params.get("yolo_confidence", 0.5))
+                    analyzer.set_iou_threshold(self.params.get("yolo_iou", 0.45))
+                    
+                    if not analyzer.load_model():
+                        self.error.emit("Failed to load YOLOv11 model")
+                        return
+                    
+                    self.progress.emit(50, "Running instance segmentation...")
+                    
+                    # Preprocessing options
+                    preprocess_opts = {
+                        "sharpen": self.params.get("yolo_sharpen", False),
+                        "edge_detection": self.params.get("yolo_edge", False),
+                        "contrast_enhance": self.params.get("yolo_contrast", False)
+                    }
+                    
+                    # Run inference
+                    prediction = analyzer.predict(self.image, preprocess_opts)
+                    
+                    if "error" in prediction:
+                        self.error.emit(f"YOLO inference error: {prediction['error']}")
+                        return
+                    
+                    self.progress.emit(80, "Creating visualization...")
+                    
+                    # Create visualization
+                    visualization = analyzer.visualize(
+                        self.image,
+                        prediction,
+                        show_masks=self.params.get("yolo_show_masks", True),
+                        show_labels=self.params.get("yolo_show_labels", True),
+                        show_confidence=self.params.get("yolo_show_conf", True),
+                        mask_opacity=self.params.get("yolo_opacity", 0.4)
+                    )
+                    
+                    # Store results
+                    result["labels"] = prediction["masks"]
+                    result["yolo_visualization"] = visualization
+                    result["detections"] = prediction["detections"]
+                    
+                    # Get dominant layer info
+                    dominant_layer = prediction["dominant_layer"]
+                    dominant_conf = prediction["dominant_confidence"]
+                    
+                    from src.config import ROAD_LAYERS
+                    layer_info = ROAD_LAYERS.get(dominant_layer, {})
+                    
+                    result["classification"] = {
+                        "layer_number": dominant_layer,
+                        "layer_name": layer_info.get("name", "Unknown"),
+                        "confidence": dominant_conf,
+                        "material": layer_info.get("material", "Unknown"),
+                        "method": f"YOLOv11 (CUDA: {self.params.get('yolo_device', 'cuda') == 'cuda'})",
+                        "num_detections": len(prediction["detections"])
+                    }
+                    
+                except Exception as e:
+                    self.error.emit(f"YOLOv11 error: {str(e)}")
+                    return
+            
             self.progress.emit(100, "Analysis complete!")
             self.finished.emit(result)
             
@@ -807,17 +875,20 @@ class MainWindow(QMainWindow):
         self.mode_dl = QRadioButton("Deep Learning (CNN Classifier)")
         self.mode_vlm = QRadioButton("VLM Analysis (GLM-4.6V)")
         self.mode_hybrid = QRadioButton("Hybrid (Classical + AI)")
+        self.mode_yolo = QRadioButton("YOLOv11 (Instance Segmentation)")
         
         mode_layout.addWidget(self.mode_classical)
         mode_layout.addWidget(self.mode_dl)
         mode_layout.addWidget(self.mode_vlm)
         mode_layout.addWidget(self.mode_hybrid)
+        mode_layout.addWidget(self.mode_yolo)
         
         # Connect mode buttons to dynamic panel switching
         self.mode_classical.toggled.connect(lambda: self.switch_mode_panel("classical"))
         self.mode_dl.toggled.connect(lambda: self.switch_mode_panel("deep_learning"))
         self.mode_vlm.toggled.connect(lambda: self.switch_mode_panel("vlm"))
         self.mode_hybrid.toggled.connect(lambda: self.switch_mode_panel("hybrid"))
+        self.mode_yolo.toggled.connect(lambda: self.switch_mode_panel("yolo"))
         
         layout.addWidget(mode_group)
         
@@ -836,6 +907,9 @@ class MainWindow(QMainWindow):
         
         self.hybrid_params = self.create_hybrid_params()
         self.params_stack.addWidget(self.hybrid_params)
+        
+        self.yolo_params = self.create_yolo_params()
+        self.params_stack.addWidget(self.yolo_params)
         
         layout.addWidget(self.params_stack)
         
@@ -896,7 +970,8 @@ class MainWindow(QMainWindow):
             "classical": 0,
             "deep_learning": 1,
             "vlm": 2,
-            "hybrid": 3
+            "hybrid": 3,
+            "yolo": 4
         }
         self.params_stack.setCurrentIndex(mode_to_index.get(mode, 0))
         self.status_bar.showMessage(f"Switched to {mode.replace('_', ' ').title()} mode")
@@ -1198,6 +1273,160 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return widget
     
+    def create_yolo_params(self) -> QWidget:
+        """Create YOLOv11 Instance Segmentation mode parameter panel."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Sub-mode selection (Load Image / Live Preview)
+        submode_group = QGroupBox("Input Mode")
+        submode_layout = QHBoxLayout(submode_group)
+        
+        self.yolo_load_image = QRadioButton("📁 Load Image")
+        self.yolo_load_image.setChecked(True)
+        self.yolo_live_preview = QRadioButton("🎥 Live Preview")
+        
+        submode_layout.addWidget(self.yolo_load_image)
+        submode_layout.addWidget(self.yolo_live_preview)
+        layout.addWidget(submode_group)
+        
+        # Connect sub-mode changes
+        self.yolo_live_preview.toggled.connect(self.toggle_yolo_live_mode)
+        
+        # Inference settings
+        inference_group = QGroupBox("Inference Settings")
+        inference_layout = QGridLayout(inference_group)
+        
+        # Confidence threshold
+        inference_layout.addWidget(QLabel("Confidence:"), 0, 0)
+        self.yolo_confidence = QSlider(Qt.Horizontal)
+        self.yolo_confidence.setRange(10, 90)
+        self.yolo_confidence.setValue(50)
+        self.yolo_confidence_label = QLabel("0.50")
+        self.yolo_confidence.valueChanged.connect(
+            lambda v: self.yolo_confidence_label.setText(f"{v/100:.2f}")
+        )
+        inference_layout.addWidget(self.yolo_confidence, 0, 1)
+        inference_layout.addWidget(self.yolo_confidence_label, 0, 2)
+        
+        # IoU threshold
+        inference_layout.addWidget(QLabel("IoU Threshold:"), 1, 0)
+        self.yolo_iou = QSlider(Qt.Horizontal)
+        self.yolo_iou.setRange(20, 80)
+        self.yolo_iou.setValue(45)
+        self.yolo_iou_label = QLabel("0.45")
+        self.yolo_iou.valueChanged.connect(
+            lambda v: self.yolo_iou_label.setText(f"{v/100:.2f}")
+        )
+        inference_layout.addWidget(self.yolo_iou, 1, 1)
+        inference_layout.addWidget(self.yolo_iou_label, 1, 2)
+        
+        # Device selection
+        inference_layout.addWidget(QLabel("Device:"), 2, 0)
+        self.yolo_device = QComboBox()
+        self.yolo_device.addItems(["CUDA (GPU)", "CPU"])
+        inference_layout.addWidget(self.yolo_device, 2, 1, 1, 2)
+        
+        layout.addWidget(inference_group)
+        
+        # Preprocessing options
+        preproc_group = QGroupBox("Preprocessing")
+        preproc_layout = QVBoxLayout(preproc_group)
+        
+        self.yolo_sharpen = QCheckBox("Sharpen Image")
+        self.yolo_edge = QCheckBox("Edge Detection Overlay")
+        self.yolo_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
+        
+        preproc_layout.addWidget(self.yolo_sharpen)
+        preproc_layout.addWidget(self.yolo_edge)
+        preproc_layout.addWidget(self.yolo_contrast)
+        layout.addWidget(preproc_group)
+        
+        # Display options
+        display_group = QGroupBox("Display Options")
+        display_layout = QGridLayout(display_group)
+        
+        self.yolo_show_masks = QCheckBox("Show Masks")
+        self.yolo_show_masks.setChecked(True)
+        self.yolo_show_labels = QCheckBox("Show Labels")
+        self.yolo_show_labels.setChecked(True)
+        self.yolo_show_conf = QCheckBox("Show Confidence")
+        self.yolo_show_conf.setChecked(True)
+        
+        display_layout.addWidget(self.yolo_show_masks, 0, 0)
+        display_layout.addWidget(self.yolo_show_labels, 0, 1)
+        display_layout.addWidget(self.yolo_show_conf, 1, 0)
+        
+        # Mask opacity
+        display_layout.addWidget(QLabel("Mask Opacity:"), 2, 0)
+        self.yolo_opacity = QSlider(Qt.Horizontal)
+        self.yolo_opacity.setRange(10, 90)
+        self.yolo_opacity.setValue(40)
+        self.yolo_opacity_label = QLabel("0.40")
+        self.yolo_opacity.valueChanged.connect(
+            lambda v: self.yolo_opacity_label.setText(f"{v/100:.2f}")
+        )
+        display_layout.addWidget(self.yolo_opacity, 2, 1)
+        display_layout.addWidget(self.yolo_opacity_label, 2, 2)
+        
+        layout.addWidget(display_group)
+        
+        # Live preview controls (initially hidden)
+        self.live_controls_group = QGroupBox("Live Preview Controls")
+        live_layout = QHBoxLayout(self.live_controls_group)
+        
+        self.live_start_btn = QPushButton("▶ Start")
+        self.live_stop_btn = QPushButton("■ Stop")
+        self.live_stop_btn.setEnabled(False)
+        self.fps_label = QLabel("FPS: --")
+        self.fps_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
+        
+        live_layout.addWidget(self.live_start_btn)
+        live_layout.addWidget(self.live_stop_btn)
+        live_layout.addStretch()
+        live_layout.addWidget(self.fps_label)
+        
+        self.live_controls_group.setVisible(False)  # Hidden by default
+        layout.addWidget(self.live_controls_group)
+        
+        # Connect live preview buttons
+        self.live_start_btn.clicked.connect(self.start_live_preview)
+        self.live_stop_btn.clicked.connect(self.stop_live_preview)
+        
+        # Info text
+        info_label = QLabel(
+            "YOLOv11 performs real-time instance segmentation of road layers.\n"
+            "Use 'Load Image' for static analysis or 'Live Preview' for real-time capture."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def toggle_yolo_live_mode(self, is_live: bool):
+        """Toggle between Load Image and Live Preview modes."""
+        self.live_controls_group.setVisible(is_live)
+        if is_live:
+            self.status_bar.showMessage("Live Preview mode - Click 'Start' to begin window capture")
+        else:
+            self.status_bar.showMessage("Load Image mode selected")
+    
+    def start_live_preview(self):
+        """Start live window capture and YOLO inference."""
+        # TODO: Implement window selector dialog and capture thread
+        QMessageBox.information(self, "Coming Soon", 
+            "Live Preview feature is coming soon!\n\n"
+            "This will allow real-time segmentation of a captured window.")
+    
+    def stop_live_preview(self):
+        """Stop live preview capture."""
+        # TODO: Stop capture thread
+        self.live_start_btn.setEnabled(True)
+        self.live_stop_btn.setEnabled(False)
+        self.fps_label.setText("FPS: --")
+    
     def create_preprocessing_params(self) -> QWidget:
         """Create preprocessing parameters widget."""
         widget = QWidget()
@@ -1417,6 +1646,8 @@ class MainWindow(QMainWindow):
             return "deep_learning"
         elif self.mode_vlm.isChecked():
             return "vlm"
+        elif self.mode_yolo.isChecked():
+            return "yolo"
         else:
             return "hybrid"
     
@@ -1457,7 +1688,20 @@ class MainWindow(QMainWindow):
             "hybrid_primary_method": self.primary_combo.currentText(),
             "hybrid_vlm_validation": self.ai_validation_check.isChecked(),
             "classical_weight": self.classical_weight_spin.value() / 100.0,
-            "hybrid_conflict_rule": self.conflict_combo.currentText()
+            "hybrid_conflict_rule": self.conflict_combo.currentText(),
+            
+            # YOLOv11 mode parameters
+            "yolo_submode": "live" if self.yolo_live_preview.isChecked() else "image",
+            "yolo_confidence": self.yolo_confidence.value() / 100.0,
+            "yolo_iou": self.yolo_iou.value() / 100.0,
+            "yolo_device": "cuda" if "CUDA" in self.yolo_device.currentText() else "cpu",
+            "yolo_sharpen": self.yolo_sharpen.isChecked(),
+            "yolo_edge": self.yolo_edge.isChecked(),
+            "yolo_contrast": self.yolo_contrast.isChecked(),
+            "yolo_show_masks": self.yolo_show_masks.isChecked(),
+            "yolo_show_labels": self.yolo_show_labels.isChecked(),
+            "yolo_show_conf": self.yolo_show_conf.isChecked(),
+            "yolo_opacity": self.yolo_opacity.value() / 100.0
         }
         return params
     
@@ -1508,8 +1752,13 @@ class MainWindow(QMainWindow):
         self.analyze_btn.setEnabled(True)
         self.save_btn.setEnabled(True)
         
-        # Display segmentation result - use VLM visualization if available
-        if "vlm_visualization" in result and self.mode == "vlm":
+        # Display segmentation result - use mode-specific visualization if available
+        if "yolo_visualization" in result and self.mode == "yolo":
+            # Use YOLO's mask overlay visualization
+            self.result_label.setImage(result["yolo_visualization"])
+            # Store for PDF export
+            self.result["colored_segmentation"] = result["yolo_visualization"]
+        elif "vlm_visualization" in result and self.mode == "vlm":
             # Use the enhanced VLM overlay visualization
             self.result_label.setImage(result["vlm_visualization"])
             # Store for PDF export

@@ -170,6 +170,26 @@ DEEP_LEARNING_CONFIG = {
 }
 
 # =============================================================================
+# YOLOv11 INSTANCE SEGMENTATION PARAMETERS
+# =============================================================================
+
+YOLO_CONFIG = {
+    "model_path": "YOLOv11/YOLOv11_11_weight.pt",
+    "device": "cuda",  # "cuda" or "cpu"
+    "confidence": 0.5,
+    "iou_threshold": 0.45,
+    "target_fps": 30,
+    # Class name to layer number mapping
+    "class_mapping": {
+        "layer_subgrade": 1,
+        "layer_subbase": 2,
+        "layer_basecourse": 3,
+        "layer_bindercourse": 4,
+        "layer_surfacecourse": 5
+    }
+}
+
+# =============================================================================
 # VLM ANALYSIS PARAMETERS
 # =============================================================================
 
