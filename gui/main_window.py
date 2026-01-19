@@ -898,12 +898,13 @@ class MainWindow(QMainWindow):
         """
         
         self.mode_buttons = {}
+        # 3x2 grid layout: Row 0 = Classical, CNN, VLM | Row 1 = Hybrid, YOLOv11, (empty)
         modes = [
             ("classical", "📊 Classical", 0, 0),
             ("deep_learning", "🧠 CNN", 0, 1),
-            ("vlm", "🔍 VLM", 1, 0),
-            ("hybrid", "⚡ Hybrid", 1, 1),
-            ("yolo", "🎯 YOLOv11", 2, 0)
+            ("vlm", "🔍 VLM", 0, 2),
+            ("hybrid", "⚡ Hybrid", 1, 0),
+            ("yolo", "🎯 YOLOv11", 1, 1)
         ]
         
         for mode_id, label, row, col in modes:
