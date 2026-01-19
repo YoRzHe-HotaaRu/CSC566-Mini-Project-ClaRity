@@ -1108,6 +1108,24 @@ class MainWindow(QMainWindow):
         self.batch_spin.setVisible(False)
         
         layout.addWidget(infer_group)
+        
+        # Preprocessing group
+        preprocess_group = QGroupBox("Preprocessing")
+        preprocess_layout = QVBoxLayout(preprocess_group)
+        
+        self.cnn_sharpen = QCheckBox("Sharpen Image")
+        self.cnn_sharpen.setToolTip("Apply sharpening filter to enhance edge details")
+        preprocess_layout.addWidget(self.cnn_sharpen)
+        
+        self.cnn_edge = QCheckBox("Edge Detection Overlay")
+        self.cnn_edge.setToolTip("Overlay edge detection to highlight boundaries")
+        preprocess_layout.addWidget(self.cnn_edge)
+        
+        self.cnn_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
+        self.cnn_contrast.setToolTip("Apply CLAHE for better contrast before inference")
+        preprocess_layout.addWidget(self.cnn_contrast)
+        
+        layout.addWidget(preprocess_group)
         layout.addStretch()
         return widget
     
@@ -1165,6 +1183,24 @@ class MainWindow(QMainWindow):
         output_layout.addWidget(self.vlm_recom_check)
         
         layout.addWidget(output_group)
+        
+        # Preprocessing group
+        preprocess_group = QGroupBox("Preprocessing")
+        preprocess_layout = QVBoxLayout(preprocess_group)
+        
+        self.vlm_sharpen = QCheckBox("Sharpen Image")
+        self.vlm_sharpen.setToolTip("Apply sharpening filter before VLM analysis")
+        preprocess_layout.addWidget(self.vlm_sharpen)
+        
+        self.vlm_edge = QCheckBox("Edge Detection Overlay")
+        self.vlm_edge.setToolTip("Overlay edge detection to highlight boundaries")
+        preprocess_layout.addWidget(self.vlm_edge)
+        
+        self.vlm_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
+        self.vlm_contrast.setToolTip("Apply CLAHE for better contrast before VLM")
+        preprocess_layout.addWidget(self.vlm_contrast)
+        
+        layout.addWidget(preprocess_group)
         layout.addStretch()
         return widget
     
@@ -1308,6 +1344,23 @@ class MainWindow(QMainWindow):
         info_label.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
         layout.addWidget(info_label)
         
+        # Preprocessing group
+        preprocess_group = QGroupBox("Preprocessing")
+        preprocess_layout = QVBoxLayout(preprocess_group)
+        
+        self.hybrid_sharpen = QCheckBox("Sharpen Image")
+        self.hybrid_sharpen.setToolTip("Apply sharpening filter before analysis")
+        preprocess_layout.addWidget(self.hybrid_sharpen)
+        
+        self.hybrid_edge = QCheckBox("Edge Detection Overlay")
+        self.hybrid_edge.setToolTip("Overlay edge detection to highlight boundaries")
+        preprocess_layout.addWidget(self.hybrid_edge)
+        
+        self.hybrid_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
+        self.hybrid_contrast.setToolTip("Apply CLAHE for better contrast")
+        preprocess_layout.addWidget(self.hybrid_contrast)
+        
+        layout.addWidget(preprocess_group)
         layout.addStretch()
         return widget
     
@@ -1626,37 +1679,60 @@ class MainWindow(QMainWindow):
     def create_preprocessing_params(self) -> QWidget:
         """Create preprocessing parameters widget."""
         widget = QWidget()
-        layout = QGridLayout(widget)
+        layout = QVBoxLayout(widget)
+        
+        # Basic settings group
+        basic_group = QGroupBox("Basic Settings")
+        basic_layout = QGridLayout(basic_group)
         
         # Noise filter
-        layout.addWidget(QLabel("Noise Filter:"), 0, 0)
+        basic_layout.addWidget(QLabel("Noise Filter:"), 0, 0)
         self.noise_combo = QComboBox()
         self.noise_combo.addItems(["median", "gaussian", "bilateral"])
-        layout.addWidget(self.noise_combo, 0, 1)
+        basic_layout.addWidget(self.noise_combo, 0, 1)
         
         # Kernel size
-        layout.addWidget(QLabel("Kernel Size:"), 1, 0)
+        basic_layout.addWidget(QLabel("Kernel Size:"), 1, 0)
         self.kernel_spin = QSpinBox()
         self.kernel_spin.setRange(3, 15)
         self.kernel_spin.setSingleStep(2)
         self.kernel_spin.setValue(3)
-        layout.addWidget(self.kernel_spin, 1, 1)
+        basic_layout.addWidget(self.kernel_spin, 1, 1)
         
         # Contrast method
-        layout.addWidget(QLabel("Contrast:"), 2, 0)
+        basic_layout.addWidget(QLabel("Contrast:"), 2, 0)
         self.contrast_combo = QComboBox()
         self.contrast_combo.addItems(["clahe", "histogram_eq", "gamma"])
-        layout.addWidget(self.contrast_combo, 2, 1)
+        basic_layout.addWidget(self.contrast_combo, 2, 1)
         
         # CLAHE clip limit
-        layout.addWidget(QLabel("CLAHE Clip:"), 3, 0)
+        basic_layout.addWidget(QLabel("CLAHE Clip:"), 3, 0)
         self.clahe_spin = QDoubleSpinBox()
         self.clahe_spin.setRange(1.0, 5.0)
         self.clahe_spin.setValue(2.0)
         self.clahe_spin.setSingleStep(0.5)
-        layout.addWidget(self.clahe_spin, 3, 1)
+        basic_layout.addWidget(self.clahe_spin, 3, 1)
         
-        layout.setRowStretch(4, 1)
+        layout.addWidget(basic_group)
+        
+        # Optional Enhancements group
+        enhance_group = QGroupBox("Optional Enhancements")
+        enhance_layout = QVBoxLayout(enhance_group)
+        
+        self.classical_sharpen = QCheckBox("Sharpen Image")
+        self.classical_sharpen.setToolTip("Apply sharpening filter to enhance edge details")
+        enhance_layout.addWidget(self.classical_sharpen)
+        
+        self.classical_edge = QCheckBox("Edge Detection Overlay")
+        self.classical_edge.setToolTip("Overlay edge detection to highlight boundaries")
+        enhance_layout.addWidget(self.classical_edge)
+        
+        self.classical_clahe_enhance = QCheckBox("Contrast Enhancement (CLAHE)")
+        self.classical_clahe_enhance.setToolTip("Apply additional CLAHE for better contrast")
+        enhance_layout.addWidget(self.classical_clahe_enhance)
+        
+        layout.addWidget(enhance_group)
+        layout.addStretch()
         return widget
     
     def create_features_params(self) -> QWidget:
