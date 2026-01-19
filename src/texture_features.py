@@ -189,9 +189,12 @@ def compute_lbp(
     if method is None:
         method = LBP_CONFIG["method"]
     
-    # Ensure image is float
-    if image.dtype == np.uint8:
-        image = image.astype(np.float64)
+    # Ensure image is uint8 (integer dtype) to avoid skimage warning
+    if image.dtype != np.uint8:
+        if image.max() <= 1:
+            image = (image * 255).astype(np.uint8)
+        else:
+            image = image.astype(np.uint8)
     
     lbp = local_binary_pattern(image, n_points, radius, method=method)
     
