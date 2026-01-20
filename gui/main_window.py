@@ -169,7 +169,17 @@ class AnalysisWorker(QThread):
                     
                     # Get parameters from GUI
                     backbone_raw = self.params.get("dl_backbone", "ResNet-101")
-                    backbone = backbone_raw.lower().replace("-", "")
+                    
+                    # Map GUI backbone names to valid encoder names
+                    backbone_map = {
+                        "ResNet-50": "resnet50",
+                        "ResNet-101": "resnet101",
+                        "ResNet-152": "resnet152",
+                        "MobileNetV2": "mobilenet_v2",
+                        "EfficientNet-B0": "efficientnet-b0",
+                        "EfficientNet-B4": "efficientnet-b4",
+                    }
+                    backbone = backbone_map.get(backbone_raw, backbone_raw.lower().replace("-", ""))
                     use_pretrained = self.params.get("dl_pretrained", True)
                     use_cuda = "cuda" in self.params.get("dl_device", "CPU").lower()
                     resolution = self.params.get("dl_resolution", "512x512")
