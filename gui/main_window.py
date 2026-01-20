@@ -1108,6 +1108,17 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
+        # Demo Mode Notice
+        notice = QLabel(
+            "💡 For accurate road layer analysis, use <b>VLM</b>, <b>Classical</b> or <b>YOLOv11</b> mode."
+        )
+        notice.setWordWrap(True)
+        notice.setStyleSheet(
+            "background-color: #3d3d00; color: #ffcc00; padding: 8px; "
+            "border-radius: 4px; margin-bottom: 5px;"
+        )
+        layout.addWidget(notice)
+        
         # Model Settings group
         model_group = QGroupBox("Model Settings")
         model_layout = QGridLayout(model_group)

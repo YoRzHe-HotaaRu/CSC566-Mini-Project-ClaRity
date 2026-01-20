@@ -132,6 +132,12 @@ class DeepLabSegmenter:
             self.device = torch.device("cpu")
             print("Using CPU")
         
+        # Set random seed for reproducibility
+        # This ensures the decoder weights are initialized the same way each time
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(42)
+        
         # Create model
         self.model = smp.DeepLabV3Plus(
             encoder_name=self.encoder_name,
