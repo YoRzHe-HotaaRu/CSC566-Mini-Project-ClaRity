@@ -214,6 +214,45 @@ flowchart LR
     H --> I[Bounding Box + Banner]
 ```
 
+### Hybrid Analysis Mode Flow
+
+```mermaid
+flowchart TB
+    subgraph Input["Input"]
+        A[Input Image]
+    end
+    
+    subgraph Classical["Classical Analysis"]
+        B[GLCM/LBP Features]
+        C[Segmentation]
+        D[Classical Result]
+    end
+    
+    subgraph VLM["VLM Cross-Check"]
+        E[GLM-4.6V Analysis]
+        F[VLM Result]
+    end
+    
+    subgraph Fusion["Result Fusion"]
+        G{Conflict?}
+        H[Weight Balance]
+        I[Conflict Resolution Rule]
+    end
+    
+    subgraph Output["Final Result"]
+        J[Combined Classification]
+        K[Higher Accuracy]
+    end
+    
+    A --> B --> C --> D
+    A --> E --> F
+    D & F --> G
+    G -->|No| J
+    G -->|Yes| H --> I --> J
+    J --> K
+```
+
+
 ### YOLOv11 Instance Segmentation Flow
 
 ```mermaid
