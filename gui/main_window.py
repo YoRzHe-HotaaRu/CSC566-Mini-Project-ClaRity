@@ -261,8 +261,8 @@ class AnalysisWorker(QThread):
                     
                     # Apply preprocessing enhancements based on user settings
                     if self.params.get("cnn_noise", False):
-                        # Apply median filter for noise reduction
-                        base_image = cv2.medianBlur(base_image, 3)
+                        # Apply bilateral filter for light noise reduction (preserves edges)
+                        base_image = cv2.bilateralFilter(base_image, 5, 25, 25)
                     
                     if self.params.get("cnn_contrast", False):
                         # Apply CLAHE for contrast enhancement
@@ -390,8 +390,8 @@ class AnalysisWorker(QThread):
                     
                     # Apply preprocessing enhancements based on user settings
                     if self.params.get("vlm_noise", False):
-                        # Apply median filter for noise reduction
-                        blended = cv2.medianBlur(blended, 3)
+                        # Apply bilateral filter for light noise reduction (preserves edges)
+                        blended = cv2.bilateralFilter(blended, 5, 25, 25)
                     
                     if self.params.get("vlm_contrast", False):
                         # Apply CLAHE for contrast enhancement
@@ -1136,7 +1136,7 @@ class MainWindow(QMainWindow):
         
         # Demo Mode Notice
         notice = QLabel(
-            "💡 For accurate road layer analysis, use <b>VLM</b>, <b>Classical</b> or <b>YOLOv11</b> mode."
+            "⚠️ <b>Experimental</b>, bug may occurs."
         )
         notice.setWordWrap(True)
         notice.setStyleSheet(
