@@ -44,39 +44,39 @@ ROAD_LAYERS = {
         "name": "Subbase Course",
         "full_name": "Subbase Course",
         "material": "Crushed aggregate (coarse)",
-        "color": (128, 128, 128),  # Gray (BGR)
-        "hex_color": "#808080"
+        "color": (128, 128, 180),  # Tan/Beige (BGR) - more visible
+        "hex_color": "#B48080"
     },
     3: {
         "name": "Base Course",
         "full_name": "Base Course",
         "material": "Crushed aggregate (finer)",
-        "color": (169, 169, 169),  # Light Gray (BGR)
-        "hex_color": "#A9A9A9"
+        "color": (169, 169, 200),  # Light pinkish-gray (BGR)
+        "hex_color": "#C8A9A9"
     },
     4: {
         "name": "Binder Course",
         "full_name": "Binder Course",
         "material": "Premix asphalt",
-        "color": (70, 70, 70),  # Dark Gray (BGR) - asphalt
-        "hex_color": "#464646"
+        "color": (80, 100, 140),  # Dark orange-brown (BGR) - distinct from 5
+        "hex_color": "#8C6450"
     },
     5: {
         "name": "Surface Course",
         "full_name": "Wearing Course",
         "material": "Premix asphalt (smooth)",
-        "color": (50, 50, 50),  # Very Dark Gray (BGR) - asphalt
-        "hex_color": "#323232"
+        "color": (100, 80, 60),  # Dark blue-gray (BGR) - visible on dark background
+        "hex_color": "#3C5064"
     }
 }
 
 # Layer color map for visualization (RGB for matplotlib)
 LAYER_COLORS_RGB = {
     1: (139/255, 90/255, 43/255),   # Brown - Subgrade
-    2: (128/255, 128/255, 128/255), # Gray - Subbase
-    3: (169/255, 169/255, 169/255), # Light Gray - Base
-    4: (70/255, 70/255, 70/255),    # Dark Gray - Binder (asphalt)
-    5: (50/255, 50/255, 50/255)     # Very Dark Gray - Surface (asphalt)
+    2: (180/255, 128/255, 128/255), # Tan/Beige - Subbase (more visible)
+    3: (200/255, 169/255, 169/255), # Light pinkish-gray - Base
+    4: (140/255, 100/255, 80/255),  # Dark orange-brown - Binder (distinct)
+    5: (60/255, 80/255, 100/255)    # Dark blue-gray - Surface (visible)
 }
 
 # =============================================================================

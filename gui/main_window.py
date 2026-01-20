@@ -242,6 +242,62 @@ class AnalysisWorker(QThread):
                         "method": f"DeepLabv3+ ({backbone_raw}, {'CUDA' if use_cuda else 'CPU'})"
                     }
                     
+                    # Create CNN visualization with overlay on original image
+                    self.progress.emit(90, "Creating visualization...")
+                    h, w = self.image.shape[:2]
+                    
+                    # Start with original image
+                    blended = self.image.copy()
+                    
+                    # Create colored segmentation overlay
+                    from src.config import LAYER_COLORS_RGB
+                    overlay = np.zeros_like(blended)
+                    
+                    for layer_num in unique:
+                        layer_mask = (labels == layer_num)
+                        if layer_mask.any():
+                            color_bgr = ROAD_LAYERS.get(int(layer_num), {}).get("color", (100, 100, 100))
+                            overlay[layer_mask] = color_bgr
+                    
+                    # Blend overlay with original (alpha blending)
+                    alpha = 0.4  # 40% overlay, 60% original
+                    blended = cv2.addWeighted(self.image, 1 - alpha, overlay, alpha, 0)
+                    
+                    # Instance segmentation: draw contours around each connected region
+                    for layer_num in unique:
+                        layer_mask = (labels == layer_num).astype(np.uint8)
+                        contours, _ = cv2.findContours(layer_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        
+                        # Get layer color for contour (brighter version)
+                        base_color = ROAD_LAYERS.get(int(layer_num), {}).get("color", (100, 100, 100))
+                        contour_color = tuple(min(255, int(c * 1.5 + 50)) for c in base_color)
+                        
+                        # Draw contours
+                        cv2.drawContours(blended, contours, -1, contour_color, 2)
+                    
+                    # Add info banner at top
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = max(0.5, min(h, w) / 600)
+                    thickness = max(1, int(font_scale * 2))
+                    
+                    banner_height = int(h * 0.10)
+                    banner_overlay = blended.copy()
+                    cv2.rectangle(banner_overlay, (0, 0), (w, banner_height), (0, 0, 0), -1)
+                    blended = cv2.addWeighted(blended, 0.4, banner_overlay, 0.6, 0)
+                    
+                    # Layer info text
+                    text = f"DeepLabv3+: Layer {dominant_layer} - {layer_name}"
+                    cv2.putText(blended, text, (10, int(banner_height * 0.50)), 
+                               font, font_scale, (255, 255, 255), thickness)
+                    
+                    # Confidence text
+                    conf_text = f"Confidence: {dominant_pct:.1%} | Layers: {len(unique)}"
+                    cv2.putText(blended, conf_text, (10, int(banner_height * 0.85)), 
+                               font, font_scale * 0.7, (200, 200, 200), max(1, thickness - 1))
+                    
+                    # Store visualization
+                    result["cnn_visualization"] = blended
+                    
                 except Exception as e:
                     self.error.emit(f"Deep learning error: {str(e)}")
                     return
@@ -2051,6 +2107,11 @@ class MainWindow(QMainWindow):
             self.result_label.setImage(result["vlm_visualization"])
             # Store for PDF export
             self.result["colored_segmentation"] = result["vlm_visualization"]
+        elif "cnn_visualization" in result and self.mode == "deep_learning":
+            # Use CNN's instance segmentation overlay visualization
+            self.result_label.setImage(result["cnn_visualization"])
+            # Store for PDF export
+            self.result["colored_segmentation"] = result["cnn_visualization"]
         elif "labels" in result:
             colored = create_colored_segmentation(result["labels"])
             self.result_label.setImage(colored)
