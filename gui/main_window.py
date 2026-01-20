@@ -257,11 +257,27 @@ class AnalysisWorker(QThread):
                     h, w = self.image.shape[:2]
                     
                     # Start with original image
-                    blended = self.image.copy()
+                    base_image = self.image.copy()
+                    
+                    # Apply preprocessing enhancements based on user settings
+                    if self.params.get("cnn_noise", False):
+                        # Apply median filter for noise reduction
+                        base_image = cv2.medianBlur(base_image, 3)
+                    
+                    if self.params.get("cnn_contrast", False):
+                        # Apply CLAHE for contrast enhancement
+                        lab = cv2.cvtColor(base_image, cv2.COLOR_BGR2LAB)
+                        lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+                        base_image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+                    
+                    if self.params.get("cnn_sharpen", False):
+                        # Apply sharpening kernel
+                        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+                        base_image = cv2.filter2D(base_image, -1, kernel)
                     
                     # Create colored segmentation overlay
                     from src.config import LAYER_COLORS_RGB
-                    overlay = np.zeros_like(blended)
+                    overlay = np.zeros_like(base_image)
                     
                     for layer_num in unique:
                         layer_mask = (labels == layer_num)
@@ -269,9 +285,17 @@ class AnalysisWorker(QThread):
                             color_bgr = ROAD_LAYERS.get(int(layer_num), {}).get("color", (100, 100, 100))
                             overlay[layer_mask] = color_bgr
                     
-                    # Blend overlay with original (alpha blending)
+                    # Blend overlay with base image (alpha blending)
                     alpha = 0.4  # 40% overlay, 60% original
-                    blended = cv2.addWeighted(self.image, 1 - alpha, overlay, alpha, 0)
+                    blended = cv2.addWeighted(base_image, 1 - alpha, overlay, alpha, 0)
+                    
+                    # Apply edge detection overlay if enabled
+                    if self.params.get("cnn_edge", False):
+                        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+                        edges = cv2.Canny(gray, 50, 150)
+                        edges_colored = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+                        edges_colored[edges > 0] = [0, 255, 0]  # Green edges
+                        blended = cv2.addWeighted(blended, 0.85, edges_colored, 0.15, 0)
                     
                     # Instance segmentation: draw contours around each connected region
                     for layer_num in unique:
@@ -364,25 +388,27 @@ class AnalysisWorker(QThread):
                     # Start with original image
                     blended = self.image.copy()
                     
-                    # ===== EDGE DETECTION + MUTED/SHARP EFFECT =====
-                    gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-                    edges = cv2.Canny(gray, 50, 150)
+                    # Apply preprocessing enhancements based on user settings
+                    if self.params.get("vlm_noise", False):
+                        # Apply median filter for noise reduction
+                        blended = cv2.medianBlur(blended, 3)
                     
-                    # Create slightly desaturated look (muted colors)
-                    gray_3ch = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                    blended = cv2.addWeighted(self.image, 0.7, gray_3ch, 0.3, 0)  # 30% gray blend
+                    if self.params.get("vlm_contrast", False):
+                        # Apply CLAHE for contrast enhancement
+                        lab = cv2.cvtColor(blended, cv2.COLOR_BGR2LAB)
+                        lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+                        blended = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
                     
-                    # Darken slightly
-                    blended = cv2.convertScaleAbs(blended, alpha=0.92, beta=-5)  # Slight darkening
+                    if self.params.get("vlm_sharpen", False):
+                        # Apply sharpening kernel
+                        sharpen_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+                        blended = cv2.filter2D(blended, -1, sharpen_kernel)
                     
-                    # Apply MILD sharpening kernel
-                    sharpen_kernel = np.array([[0, -0.5, 0],
-                                               [-0.5,  3, -0.5],
-                                               [0, -0.5, 0]])
-                    blended = cv2.filter2D(blended, -1, sharpen_kernel)
-                    
-                    # Draw edges in dark gray for definition
-                    blended[edges > 0] = [60, 60, 60]  # Dark gray edges
+                    # Apply edge detection overlay if enabled
+                    if self.params.get("vlm_edge", False):
+                        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+                        edges = cv2.Canny(gray, 50, 150)
+                        blended[edges > 0] = [0, 255, 0]  # Green edges
                     
                     # ===== BOUNDING BOX FRAME =====
                     box_color = (0, 255, 0)  # Bright Green
@@ -1186,21 +1212,25 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(infer_group)
         
-        # Preprocessing group
+        # Preprocessing group - 2x2 grid layout
         preprocess_group = QGroupBox("Preprocessing")
-        preprocess_layout = QVBoxLayout(preprocess_group)
+        preprocess_layout = QGridLayout(preprocess_group)
         
         self.cnn_sharpen = QCheckBox("Sharpen Image")
         self.cnn_sharpen.setToolTip("Apply sharpening filter to enhance edge details")
-        preprocess_layout.addWidget(self.cnn_sharpen)
+        preprocess_layout.addWidget(self.cnn_sharpen, 0, 0)
         
         self.cnn_edge = QCheckBox("Edge Detection Overlay")
         self.cnn_edge.setToolTip("Overlay edge detection to highlight boundaries")
-        preprocess_layout.addWidget(self.cnn_edge)
+        preprocess_layout.addWidget(self.cnn_edge, 0, 1)
+        
+        self.cnn_noise = QCheckBox("Noise Reduction")
+        self.cnn_noise.setToolTip("Apply median filter to reduce noise")
+        preprocess_layout.addWidget(self.cnn_noise, 1, 0)
         
         self.cnn_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
         self.cnn_contrast.setToolTip("Apply CLAHE for better contrast before inference")
-        preprocess_layout.addWidget(self.cnn_contrast)
+        preprocess_layout.addWidget(self.cnn_contrast, 1, 1)
         
         layout.addWidget(preprocess_group)
         layout.addStretch()
@@ -1261,21 +1291,25 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(output_group)
         
-        # Preprocessing group
+        # Preprocessing group - 2x2 grid layout
         preprocess_group = QGroupBox("Preprocessing")
-        preprocess_layout = QVBoxLayout(preprocess_group)
+        preprocess_layout = QGridLayout(preprocess_group)
         
         self.vlm_sharpen = QCheckBox("Sharpen Image")
         self.vlm_sharpen.setToolTip("Apply sharpening filter before VLM analysis")
-        preprocess_layout.addWidget(self.vlm_sharpen)
+        preprocess_layout.addWidget(self.vlm_sharpen, 0, 0)
         
         self.vlm_edge = QCheckBox("Edge Detection Overlay")
         self.vlm_edge.setToolTip("Overlay edge detection to highlight boundaries")
-        preprocess_layout.addWidget(self.vlm_edge)
+        preprocess_layout.addWidget(self.vlm_edge, 0, 1)
+        
+        self.vlm_noise = QCheckBox("Noise Reduction")
+        self.vlm_noise.setToolTip("Apply median filter to reduce noise")
+        preprocess_layout.addWidget(self.vlm_noise, 1, 0)
         
         self.vlm_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
         self.vlm_contrast.setToolTip("Apply CLAHE for better contrast before VLM")
-        preprocess_layout.addWidget(self.vlm_contrast)
+        preprocess_layout.addWidget(self.vlm_contrast, 1, 1)
         
         layout.addWidget(preprocess_group)
         layout.addStretch()
@@ -1482,17 +1516,19 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(inference_group)
         
-        # Preprocessing options
+        # Preprocessing options - 2x2 grid layout
         preproc_group = QGroupBox("Preprocessing")
-        preproc_layout = QVBoxLayout(preproc_group)
+        preproc_layout = QGridLayout(preproc_group)
         
         self.yolo_sharpen = QCheckBox("Sharpen Image")
         self.yolo_edge = QCheckBox("Edge Detection Overlay")
+        self.yolo_noise = QCheckBox("Noise Reduction")
         self.yolo_contrast = QCheckBox("Contrast Enhancement (CLAHE)")
         
-        preproc_layout.addWidget(self.yolo_sharpen)
-        preproc_layout.addWidget(self.yolo_edge)
-        preproc_layout.addWidget(self.yolo_contrast)
+        preproc_layout.addWidget(self.yolo_sharpen, 0, 0)
+        preproc_layout.addWidget(self.yolo_edge, 0, 1)
+        preproc_layout.addWidget(self.yolo_noise, 1, 0)
+        preproc_layout.addWidget(self.yolo_contrast, 1, 1)
         layout.addWidget(preproc_group)
         
         # Display options
@@ -2015,6 +2051,10 @@ class MainWindow(QMainWindow):
             "vlm_include_material": self.vlm_material_check.isChecked(),
             "vlm_include_texture": self.vlm_texture_check.isChecked(),
             "vlm_include_recommendations": self.vlm_recom_check.isChecked(),
+            "vlm_sharpen": self.vlm_sharpen.isChecked(),
+            "vlm_edge": self.vlm_edge.isChecked(),
+            "vlm_noise": self.vlm_noise.isChecked(),
+            "vlm_contrast": self.vlm_contrast.isChecked(),
             
             # Deep Learning mode parameters
             "dl_backbone": self.backbone_combo.currentText(),
@@ -2023,6 +2063,10 @@ class MainWindow(QMainWindow):
             "dl_confidence_threshold": self.confidence_spin.value(),
             "dl_batch_size": self.batch_spin.value(),
             "dl_resolution": self.resolution_combo.currentText(),
+            "cnn_sharpen": self.cnn_sharpen.isChecked(),
+            "cnn_edge": self.cnn_edge.isChecked(),
+            "cnn_noise": self.cnn_noise.isChecked(),
+            "cnn_contrast": self.cnn_contrast.isChecked(),
             
             # Hybrid mode parameters
             "hybrid_primary_method": self.primary_combo.currentText(),
@@ -2037,6 +2081,7 @@ class MainWindow(QMainWindow):
             "yolo_device": "cuda" if "CUDA" in self.yolo_device.currentText() else "cpu",
             "yolo_sharpen": self.yolo_sharpen.isChecked(),
             "yolo_edge": self.yolo_edge.isChecked(),
+            "yolo_noise": self.yolo_noise.isChecked(),
             "yolo_contrast": self.yolo_contrast.isChecked(),
             "yolo_show_masks": self.yolo_show_masks.isChecked(),
             "yolo_show_labels": self.yolo_show_labels.isChecked(),
