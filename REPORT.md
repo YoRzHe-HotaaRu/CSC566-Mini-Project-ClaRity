@@ -470,6 +470,10 @@ All visualization modes use consistent color coding:
 
 ## 8. Source Code
 
+The complete source code for this project is publicly available and can be accessed, downloaded, or cloned from our GitHub repository:
+
+> 🔗 **GitHub Repository:** [github.com/YoRzHe-HotaaRu/CSC566-Mini-Project-ClaRity](https://github.com/YoRzHe-HotaaRu/CSC566-Mini-Project-ClaRity)
+
 ### Project Structure
 
 The codebase is organized into modular components:
