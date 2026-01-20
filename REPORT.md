@@ -53,25 +53,57 @@ The primary objective of this project is to develop an automated pipeline capabl
 | 3 | Provide a **multi-mode analysis interface** with 5 distinct analysis methods |
 | 4 | Deliver a **professional PyQt5 GUI** with real-time processing and visualization |
 | 5 | Implement **CUDA GPU acceleration** for efficient processing |
+| 6 | Integrate **configurable preprocessing options** (Sharpen, Edge Detection, Noise Reduction, CLAHE) |
+
+### Objective Details
+
+**Objective 1** focuses on building a robust classification pipeline that can accurately identify all five standard road construction layers. This requires understanding the visual differences between each layer's materials - from the raw soil of the subgrade to the smooth asphalt of the surface course. The pipeline must handle variations in lighting, camera angle, and image resolution.
+
+**Objective 2** involves implementing classical image processing techniques for texture analysis. GLCM (Gray Level Co-occurrence Matrix) extracts statistical features like contrast, energy, homogeneity, and correlation that describe surface roughness and uniformity. LBP (Local Binary Patterns) captures micro-texture patterns that help distinguish between aggregate and asphalt surfaces.
+
+**Objective 3** recognizes that different analysis scenarios benefit from different approaches. Classical mode works well for clear textures, CNN provides semantic understanding, VLM offers AI-powered explanations, Hybrid combines methods for higher accuracy, and YOLOv11 enables real-time instance detection.
+
+**Objective 4** emphasizes user experience through a professional PyQt5 interface with a modern dark theme, intuitive drag-and-drop image loading, real-time progress feedback, and comprehensive PDF report generation for documentation purposes.
+
+**Objective 5** leverages GPU acceleration through CUDA to ensure fast inference times, especially for deep learning models like DeepLabv3+ and YOLOv11 that process high-resolution satellite imagery.
+
+**Objective 6** provides users with configurable preprocessing options that apply enhancements to the visualization output, including image sharpening, edge detection overlay, bilateral noise reduction, and CLAHE contrast enhancement in a 2×2 grid layout.
 
 ---
 
 ## 3. Data Collection
 
-The images used in this project are sourced from **Google Earth Pro**, which provides high-resolution aerial satellite imagery of road construction sites at various stages of development.
+### Google Earth Pro Dataset
 
-### Dataset Organization
+The images used for Classical and CNN modes are sourced from **Google Earth Pro**, which provides high-resolution aerial satellite imagery of road construction sites at various stages of development.
+
+#### Dataset Organization
 
 The dataset is organized into five categories corresponding to the five road layers:
 
 ```
 data/
-├── subgrade/          # Layer 1 - Foundation soil images
-├── subbase/           # Layer 2 - Coarse aggregate images
-├── base_course/       # Layer 3 - Fine aggregate images
-├── binder_course/     # Layer 4 - Initial asphalt images
-└── surface_course/    # Layer 5 - Wearing surface images
+├── subgrade/          # Layer 1 - Foundation soil images (~50 images)
+├── subbase/           # Layer 2 - Coarse aggregate images (~40 images)
+├── base_course/       # Layer 3 - Fine aggregate images (~39 images)
+├── binder_course/     # Layer 4 - Initial asphalt images (~45 images)
+└── surface_course/    # Layer 5 - Wearing surface images (~71 images)
 ```
+
+### Roboflow Dataset for YOLOv11
+
+For the YOLOv11 instance segmentation model, we created and annotated a custom dataset hosted on **Roboflow Universe**:
+
+| Property | Details |
+|----------|---------|
+| **Platform** | Roboflow Universe |
+| **Dataset Name** | Malaysia Aerial Satellite Road Layers Segmentation |
+| **URL** | [universe.roboflow.com/vulkan747codez/malaysia-aerial-satellite-road-layers-segmentation](https://universe.roboflow.com/vulkan747codez/malaysia-aerial-satellite-road-layers-segmentation) |
+| **Annotation Type** | Instance Segmentation (Polygon masks) |
+| **Classes** | 5 road layer classes |
+| **Annotated By** | ClaRity Team |
+
+The Roboflow dataset was carefully annotated with polygon masks for each road layer instance, enabling the YOLOv11 model to perform precise instance segmentation rather than simple object detection.
 
 ### Image Characteristics
 
@@ -104,10 +136,12 @@ flowchart TB
         B[Drag & Drop]
     end
     
-    subgraph Preprocessing["🔧 Preprocessing"]
-        C[Noise Reduction]
-        D[CLAHE Enhancement]
-        E[Sharpening]
+    subgraph Preprocessing["🔧 Preprocessing Options"]
+        C{User Settings}
+        C1[Noise Reduction]
+        C2[CLAHE Enhancement]
+        C3[Sharpening]
+        C4[Edge Detection]
     end
     
     subgraph Modes["🎯 Analysis Modes"]
@@ -121,15 +155,16 @@ flowchart TB
     
     subgraph Output["📊 Output"]
         L[Classification Result]
-        M[Visualization]
+        M[Visualization with Preprocessing]
         N[PDF Report]
     end
     
-    A --> C
-    B --> C
-    C --> D --> E --> F
+    A --> F
+    B --> F
     F --> G & H & I & J & K
-    G & H & I & J & K --> L
+    G & H & I & J & K --> C
+    C --> C1 & C2 & C3 & C4
+    C1 & C2 & C3 & C4 --> L
     L --> M --> N
 ```
 
@@ -151,17 +186,18 @@ flowchart LR
     K --> L[Classification]
 ```
 
-### Deep Learning Mode Flow
+### Deep Learning (CNN) Mode Flow
 
 ```mermaid
 flowchart LR
     A[Input Image] --> B[Resize 512x512]
     B --> C[DeepLabv3+]
     C --> D[Semantic Labels]
-    D --> E[Overlay on Original]
-    E --> F[Instance Contours]
-    F --> G[Info Banner]
-    G --> H[Final Visualization]
+    D --> E[Apply Preprocessing]
+    E --> F[Overlay on Original]
+    F --> G[Instance Contours]
+    G --> H[Info Banner]
+    H --> I[Final Visualization]
 ```
 
 ### VLM Analysis Mode Flow
@@ -174,7 +210,43 @@ flowchart LR
     D --> E[Layer ID]
     D --> F[Confidence]
     D --> G[Material Info]
-    E & F & G --> H[Enhanced Visualization]
+    E & F & G --> H[Apply Preprocessing]
+    H --> I[Bounding Box + Banner]
+```
+
+### YOLOv11 Instance Segmentation Flow
+
+```mermaid
+flowchart TB
+    subgraph Input["Input Options"]
+        A1[Load Image]
+        A2[Live Preview]
+    end
+    
+    subgraph Model["YOLOv11 Model"]
+        B[Trained on Roboflow Dataset]
+        C[Instance Segmentation]
+    end
+    
+    subgraph Detection["Per-Instance Detection"]
+        D[Polygon Masks]
+        E[Bounding Boxes]
+        F[Class Labels]
+        G[Confidence Scores]
+    end
+    
+    subgraph Output["Multi-Layer Result"]
+        H[Multiple Layer Instances]
+        I[Layer Distribution]
+        J[Comprehensive PDF Report]
+    end
+    
+    A1 --> B
+    A2 --> B
+    B --> C
+    C --> D & E & F & G
+    D & E & F & G --> H
+    H --> I --> J
 ```
 
 > 📷 **[Insert Screenshot: Each analysis mode showing different visualization styles]**
@@ -204,19 +276,30 @@ The Classical analysis mode extracts texture features using GLCM and LBP:
 | CNN (GPU) | 1-2 seconds | Semantic understanding | Complex images |
 | VLM | 3-5 seconds | AI explanations | Unknown materials |
 | Hybrid | 4-6 seconds | Cross-validation | Highest accuracy |
-| YOLO | < 1 second | Real-time capable | Live monitoring |
+| YOLOv11 | < 1 second | Real-time, multi-instance | Live monitoring |
+
+### Preprocessing Options
+
+Each mode supports configurable preprocessing options arranged in a 2×2 grid:
+
+| Option | Effect | Method |
+|--------|--------|--------|
+| Sharpen Image | Enhances edge details | 3×3 sharpening kernel |
+| Edge Detection Overlay | Highlights boundaries | Canny edge detector (green overlay) |
+| Noise Reduction | Reduces image noise | Bilateral filter (edge-preserving) |
+| Contrast Enhancement | Improves visibility | CLAHE on LAB color space |
 
 ### Key Findings
 
 1. **Classical Mode** performed well on images with distinct textures. GLCM Energy was particularly effective for identifying smooth Surface Course layers.
 
-2. **CNN Mode** using DeepLabv3+ provided excellent pixel-level classification, especially for images with multiple layers or mixed materials.
+2. **CNN Mode** using DeepLabv3+ provided pixel-level classification. Note: This mode uses ImageNet pretrained weights and is marked as experimental.
 
 3. **VLM Mode** offered valuable natural language descriptions, helping users understand material properties and construction context.
 
 4. **Hybrid Mode** improved accuracy by cross-validating Classical and VLM results, with configurable conflict resolution.
 
-5. **YOLOv11 Mode** achieved real-time performance suitable for live preview applications.
+5. **YOLOv11 Mode** achieved real-time performance with the ability to detect **multiple layer instances** in a single image, making it ideal for complex construction sites.
 
 > 📷 **[Insert Screenshot: Comparison of results from different analysis modes on the same image]**
 
@@ -241,7 +324,7 @@ The graphical user interface was designed with usability and professionalism in 
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Mode: [Classical] [CNN] [VLM] [Hybrid] [YOLOv11]                        │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ [Mode-specific settings panel]                                          │
+│ [Mode-specific settings + Preprocessing 2×2 grid]                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ [Load Image]  [▶ Analyze]  [Export PDF]                                 │
 ├─────────────────────────────────────────────────────────────────────────┤
@@ -258,6 +341,7 @@ The graphical user interface was designed with usability and professionalism in 
 | **Dark Theme** | Professional appearance with reduced eye strain |
 | **Drag & Drop** | Easy image loading by dropping files |
 | **5 Analysis Modes** | Toggle buttons for mode selection |
+| **Preprocessing Grid** | 2×2 layout: Sharpen, Edge, Noise, CLAHE |
 | **Real-time Progress** | Progress bar during analysis |
 | **Interactive Legend** | Shows all layers, highlights detected one |
 | **PDF Export** | Save complete analysis report |
@@ -268,10 +352,10 @@ The graphical user interface was designed with usability and professionalism in 
 Each mode provides configurable parameters:
 
 - **Classical**: Preprocessing filters, feature selection (GLCM/LBP/Gabor), segmentation method
-- **CNN**: Backbone selection (ResNet-50/101, MobileNetV2), resolution, device (CUDA/CPU)
-- **VLM**: Analysis type (Layer ID/Detailed/Quick), temperature setting
+- **CNN**: Backbone selection (ResNet-50/101, MobileNetV2), resolution, device (CUDA/CPU), preprocessing (2×2 grid)
+- **VLM**: Analysis type (Layer ID/Detailed/Quick), temperature setting, preprocessing (2×2 grid)
 - **Hybrid**: VLM validation toggle, weight slider, conflict resolution rules
-- **YOLO**: Confidence threshold, IOU threshold, live window selection
+- **YOLOv11**: Confidence/IOU thresholds, live window selection, preprocessing (2×2 grid), display options
 
 > 📷 **[Insert Screenshot: GUI showing mode selection and settings panel]**
 
@@ -295,25 +379,26 @@ Each mode provides configurable parameters:
 
 ---
 
-### Example 2: Base Course Detection (Classical Mode)
+### Example 2: Multi-Layer Detection (YOLOv11 Mode)
 
-**Input:** Image showing exposed aggregate layer during construction.
+**Input:** Construction site aerial image with multiple visible layers.
 
 **Output:**
-- **Detected Layer:** Base Course (Layer 3)
-- **Confidence:** 87.5%
-- **GLCM Contrast:** 0.45 (medium roughness)
-- **GLCM Energy:** 0.32 (moderate uniformity)
+- **Detected Instances:** 5 road layer instances across 3 layer types
+- **Subbase Course:** 3 instances, 87% avg confidence
+- **Binder Course:** 1 instance, 89% confidence
+- **Surface Course:** 1 instance, 84% confidence
 
-**Process:** Classical analysis extracted GLCM and LBP features, detecting the structured aggregate pattern characteristic of the Base Course layer.
+**PDF Report Conclusion:**
+> "The YOLOv11 instance segmentation analysis successfully identified **5 road layer instances** across **3 distinct layer types**. The detected layers include: Subbase Course (3 instances, 87% avg confidence), Binder Course (1 instance, 89% avg confidence), Surface Course (1 instance, 84% avg confidence). With an overall average confidence of 87%, the model demonstrates reliable detection of road construction layers."
 
-> 📷 **[Insert Image: Original image alongside Image Segmentation Results dialog]**
+> 📷 **[Insert Image: YOLO visualization showing multiple layer instances with masks]**
 
 ---
 
-### Example 3: VLM Analysis
+### Example 3: VLM Analysis with Preprocessing
 
-**Input:** Road construction image with visible materials.
+**Input:** Road construction image with Sharpen and CLAHE preprocessing enabled.
 
 **Output (from GLM-4.6V):**
 ```
@@ -324,7 +409,9 @@ Material: This appears to be hot-mix asphalt with a smooth finish,
 Recommendation: Surface appears in good condition with uniform texture.
 ```
 
-> 📷 **[Insert Image: VLM visualization with green bounding box and info banner]**
+**Visualization:** Enhanced image with green bounding box, info banner, and preprocessing effects applied.
+
+> 📷 **[Insert Image: VLM visualization with preprocessing effects visible]**
 
 ---
 
@@ -365,7 +452,7 @@ CSC566-Mini-Project-ClaRity/
 │   └── report_generator.py      # PDF report generation
 │
 ├── gui/                         # GUI application (4 files)
-│   ├── main_window.py           # Main application (2500+ lines)
+│   ├── main_window.py           # Main application (2600+ lines)
 │   ├── splash_screen.py         # Animated startup screen
 │   ├── classical_results.py     # Result dialogs for Classical mode
 │   └── window_capture.py        # Live window capture for YOLO
@@ -395,38 +482,47 @@ def extract_glcm_features(image, distances=[1], angles=[0]):
     return features
 ```
 
-#### DeepLabv3+ Segmentation (`src/deep_learning.py`)
+#### Preprocessing Effects (`gui/main_window.py`)
 
 ```python
-import segmentation_models_pytorch as smp
+# Apply preprocessing enhancements based on user settings (2x2 grid options)
+if self.params.get("cnn_noise", False):
+    # Apply bilateral filter for light noise reduction (preserves edges)
+    base_image = cv2.bilateralFilter(base_image, 5, 25, 25)
 
-class DeepLabSegmenter:
-    def __init__(self, encoder_name="resnet101", use_cuda=True):
-        self.model = smp.DeepLabV3Plus(
-            encoder_name=encoder_name,
-            encoder_weights="imagenet",
-            classes=5
-        )
-        if use_cuda:
-            self.model = self.model.cuda()
-    
-    def segment(self, image):
-        with torch.no_grad():
-            output = self.model(input_tensor)
-            labels = torch.argmax(output, dim=1)
-        return labels + 1  # Convert to 1-indexed
+if self.params.get("cnn_contrast", False):
+    # Apply CLAHE for contrast enhancement
+    lab = cv2.cvtColor(base_image, cv2.COLOR_BGR2LAB)
+    lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lab[:, :, 0])
+    base_image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+if self.params.get("cnn_sharpen", False):
+    # Apply sharpening kernel
+    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+    base_image = cv2.filter2D(base_image, -1, kernel)
+
+if self.params.get("cnn_edge", False):
+    # Apply edge detection overlay (green edges)
+    edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 50, 150)
+    blended[edges > 0] = [0, 255, 0]
 ```
 
-#### K-Means Segmentation (`src/segmentation.py`)
+#### YOLOv11 Multi-Layer Conclusion (`src/report_generator.py`)
 
 ```python
-from sklearn.cluster import KMeans
-
-def kmeans_segment(image, n_clusters=5):
-    pixels = image.reshape(-1, 3).astype(np.float32)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    labels = kmeans.fit_predict(pixels)
-    return labels.reshape(image.shape[:2])
+# YOLO mode: Summarize all detected layers
+if self.mode == "yolo" and "detections" in self.result:
+    predictions = self.result.get("detections", [])
+    total_instances = len(predictions)
+    
+    # Group by layer and calculate averages
+    layer_counts = {}
+    for pred in predictions:
+        layer = pred.get("layer_name", "Unknown")
+        layer_counts[layer] = layer_counts.get(layer, 0) + 1
+    
+    # Build comprehensive conclusion with all layers
+    conclusion = f"Identified {total_instances} instances across {len(layer_counts)} layer types..."
 ```
 
 ### Running the Application
@@ -455,6 +551,7 @@ This project successfully developed an automated road surface layer analysis sys
 | Multi-Mode Analysis | ✅ Achieved | 5 distinct modes with configurable parameters |
 | Professional GUI | ✅ Achieved | PyQt5 dark theme with drag-drop and PDF export |
 | GPU Acceleration | ✅ Achieved | CUDA support for DeepLab and YOLO |
+| Preprocessing Options | ✅ Achieved | 2×2 grid with Sharpen, Edge, Noise, CLAHE |
 
 ### Key Contributions
 
@@ -464,20 +561,24 @@ This project successfully developed an automated road surface layer analysis sys
 
 3. **Real-Time Capability:** YOLOv11 integration with live window capture enables real-time road analysis applications.
 
-4. **Comprehensive Visualization:** Each mode provides appropriate visualization with overlays, contours, and information banners.
+4. **Multi-Instance Detection:** YOLOv11 mode can detect and report multiple road layer instances in a single image, with comprehensive PDF reports summarizing all detections.
+
+5. **Configurable Preprocessing:** Users can apply 4 preprocessing effects (in 2×2 grid layout) to enhance visualization results.
 
 ### Limitations
 
 - Classification accuracy depends on input image quality and resolution
 - VLM mode requires internet connectivity for API access
+- CNN mode uses ImageNet pretrained weights (marked as experimental)
 - Deep learning inference requires significant GPU memory
 
 ### Future Improvements
 
-1. Train custom deep learning models on larger road layer datasets
+1. Train custom DeepLabv3+ models on road layer datasets for accurate CNN predictions
 2. Add video analysis for continuous monitoring applications
 3. Implement batch processing for analyzing multiple images
 4. Develop mobile application version for field use
+5. Expand Roboflow dataset with more annotated images
 
 ---
 

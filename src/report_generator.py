@@ -857,17 +857,63 @@ class ReportGenerator:
         ))
         
         classification = self.result.get("classification", {})
-        layer_name = classification.get("layer_name", "Unknown")
-        confidence = classification.get("confidence", 0)
         
-        conclusion = (
-            f"Based on the comprehensive image analysis using the {self.mode.replace('_', ' ')} method, "
-            f"the road surface layer has been identified as <b>{layer_name}</b> "
-            f"with a confidence of <b>{confidence:.1%}</b>. "
-            f"This classification is based on texture features, color patterns, and structural characteristics "
-            f"extracted from the input image. The results can be used for road condition assessment, "
-            f"maintenance planning, and quality control purposes."
-        )
+        # YOLO mode: Summarize all detected layers
+        if self.mode == "yolo" and "detections" in self.result:
+            predictions = self.result.get("detections", [])
+            total_instances = len(predictions)
+            
+            if total_instances > 0:
+                # Group by layer
+                layer_counts = {}
+                layer_confidences = {}
+                for pred in predictions:
+                    layer_num = pred.get("layer_number", 0)
+                    layer = pred.get("layer_name", ROAD_LAYERS.get(layer_num, {}).get("name", "Unknown"))
+                    conf = pred.get("confidence", 0)
+                    layer_counts[layer] = layer_counts.get(layer, 0) + 1
+                    if layer not in layer_confidences:
+                        layer_confidences[layer] = []
+                    layer_confidences[layer].append(conf)
+                
+                # Build layer summary
+                layer_summaries = []
+                for layer, count in layer_counts.items():
+                    avg_conf = sum(layer_confidences[layer]) / len(layer_confidences[layer])
+                    layer_summaries.append(f"<b>{layer}</b> ({count} instance{'s' if count > 1 else ''}, {avg_conf:.0%} avg confidence)")
+                
+                layer_list = ", ".join(layer_summaries)
+                num_types = len(layer_counts)
+                avg_overall = sum(p.get("confidence", 0) for p in predictions) / total_instances
+                
+                conclusion = (
+                    f"The YOLOv11 instance segmentation analysis successfully identified "
+                    f"<b>{total_instances} road layer instance{'s' if total_instances > 1 else ''}</b> across "
+                    f"<b>{num_types} distinct layer type{'s' if num_types > 1 else ''}</b>. "
+                    f"The detected layers include: {layer_list}. "
+                    f"With an overall average confidence of <b>{avg_overall:.0%}</b>, the model demonstrates "
+                    f"reliable detection of road construction layers. These results provide valuable insights "
+                    f"for road condition assessment, construction monitoring, and infrastructure planning."
+                )
+            else:
+                conclusion = (
+                    "The YOLOv11 instance segmentation analysis did not detect any road layers in the image. "
+                    "This may indicate the image does not contain visible road construction layers, or the "
+                    "confidence threshold may need adjustment."
+                )
+        else:
+            # Standard conclusion for other modes
+            layer_name = classification.get("layer_name", "Unknown")
+            confidence = classification.get("confidence", 0)
+            
+            conclusion = (
+                f"Based on the comprehensive image analysis using the {self.mode.replace('_', ' ')} method, "
+                f"the road surface layer has been identified as <b>{layer_name}</b> "
+                f"with a confidence of <b>{confidence:.1%}</b>. "
+                f"This classification is based on texture features, color patterns, and structural characteristics "
+                f"extracted from the input image. The results can be used for road condition assessment, "
+                f"maintenance planning, and quality control purposes."
+            )
         
         self.elements.append(Paragraph(conclusion, self.styles['ReportBody']))
         
