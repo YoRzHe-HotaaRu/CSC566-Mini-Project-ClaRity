@@ -621,4 +621,45 @@ This project successfully developed an automated road surface layer analysis sys
 
 ---
 
+## 10. References
+
+1. **GLCM Texture Features**  
+   Haralick, R. M., Shanmugam, K., & Dinstein, I. (1973). *Textural features for image classification*. IEEE Transactions on Systems, Man, and Cybernetics, SMC-3(6), 610-621.
+
+2. **Local Binary Patterns (LBP)**  
+   Ojala, T., Pietikäinen, M., & Mäenpää, T. (2002). *Multiresolution gray-scale and rotation invariant texture classification with local binary patterns*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 24(7), 971-987.
+
+3. **DeepLabv3+ Semantic Segmentation**  
+   Chen, L. C., Zhu, Y., Papandreou, G., Schroff, F., & Adam, H. (2018). *Encoder-decoder with atrous separable convolution for semantic image segmentation*. Proceedings of the European Conference on Computer Vision (ECCV), 801-818.
+
+4. **YOLOv11 Instance Segmentation**  
+   Ultralytics. (2024). *YOLOv11 Documentation*. https://docs.ultralytics.com/
+
+5. **Segmentation Models PyTorch**  
+   Yakubovskiy, P. (2019). *Segmentation Models Pytorch*. GitHub Repository. https://github.com/qubvel/segmentation_models.pytorch
+
+6. **Roboflow Dataset Platform**  
+   Roboflow. (2024). *Computer Vision Dataset Management*. https://roboflow.com/
+
+7. **Malaysia Aerial Satellite Road Layers Dataset**  
+   ClaRity Group. (2024). *Malaysia Aerial Satellite Road Layers Segmentation*. Roboflow Universe. https://universe.roboflow.com/vulkan747codez/malaysia-aerial-satellite-road-layers-segmentation
+
+8. **GLM-4.6V Vision Language Model**  
+   Zhipu AI. (2024). *GLM-4.6V: A Multimodal Language Model*. https://open.bigmodel.cn/
+
+9. **PyQt5 GUI Framework**  
+   Riverbank Computing. (2024). *PyQt5 Reference Guide*. https://www.riverbankcomputing.com/static/Docs/PyQt5/
+
+10. **OpenCV Image Processing**  
+    Bradski, G. (2000). *The OpenCV Library*. Dr. Dobb's Journal of Software Tools.
+
+11. **scikit-image Feature Extraction**  
+    van der Walt, S., et al. (2014). *scikit-image: Image processing in Python*. PeerJ, 2, e453.
+
+12. **Google Earth Pro Satellite Imagery**  
+    Google. (2024). *Google Earth Pro*. https://www.google.com/earth/versions/
+
+---
+
 *ClaRity Group | CSC566 Image Processing | UiTM Cawangan Perak Kampus Tapah*
+
