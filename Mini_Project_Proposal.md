@@ -2,7 +2,7 @@
 
 ## 1. Project Title
 
-**Automated Road Surface Layer Identification and Analysis using Multi-Method Image Processing System**
+**Automated Road Surface Layer Identification and Analysis using Multi-Method Image Processing Method**
 
 ---
 
