@@ -504,12 +504,13 @@ CSC566-Mini-Project-ClaRity/
 
 ### Key Code Snippets
 
-#### GLCM Feature Extraction (`src/texture_features.py`)
+#### 1. Classical Mode - GLCM Feature Extraction (`src/texture_features.py`)
 
 ```python
 from skimage.feature import graycomatrix, graycoprops
 
 def extract_glcm_features(image, distances=[1], angles=[0]):
+    """Extract GLCM texture features from grayscale image."""
     glcm = graycomatrix(image, distances=distances, angles=angles, levels=256)
     
     features = {
@@ -521,47 +522,217 @@ def extract_glcm_features(image, distances=[1], angles=[0]):
     return features
 ```
 
-#### Preprocessing Effects (`gui/main_window.py`)
+#### 2. Classical Mode - K-Means Segmentation (`src/segmentation.py`)
 
 ```python
-# Apply preprocessing enhancements based on user settings (2x2 grid options)
-if self.params.get("cnn_noise", False):
-    # Apply bilateral filter for light noise reduction (preserves edges)
-    base_image = cv2.bilateralFilter(base_image, 5, 25, 25)
+from sklearn.cluster import KMeans
+import numpy as np
 
-if self.params.get("cnn_contrast", False):
-    # Apply CLAHE for contrast enhancement
-    lab = cv2.cvtColor(base_image, cv2.COLOR_BGR2LAB)
-    lab[:, :, 0] = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lab[:, :, 0])
-    base_image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-
-if self.params.get("cnn_sharpen", False):
-    # Apply sharpening kernel
-    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
-    base_image = cv2.filter2D(base_image, -1, kernel)
-
-if self.params.get("cnn_edge", False):
-    # Apply edge detection overlay (green edges)
-    edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 50, 150)
-    blended[edges > 0] = [0, 255, 0]
+def kmeans_segment(image, n_clusters=5):
+    """Segment image using K-Means clustering."""
+    # Reshape image to 2D array of pixels
+    pixels = image.reshape(-1, 3).astype(np.float32)
+    
+    # Apply K-Means clustering
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(pixels)
+    
+    # Reshape labels back to image dimensions
+    return labels.reshape(image.shape[:2])
 ```
 
-#### YOLOv11 Multi-Layer Conclusion (`src/report_generator.py`)
+#### 3. CNN Mode - DeepLabv3+ Segmentation (`src/deep_learning.py`)
 
 ```python
-# YOLO mode: Summarize all detected layers
-if self.mode == "yolo" and "detections" in self.result:
-    predictions = self.result.get("detections", [])
-    total_instances = len(predictions)
+import torch
+import segmentation_models_pytorch as smp
+
+class DeepLabSegmenter:
+    def __init__(self, encoder_name="resnet101", use_cuda=True):
+        # Set random seed for reproducibility
+        torch.manual_seed(42)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(42)
+        
+        # Create DeepLabv3+ model with pretrained encoder
+        self.model = smp.DeepLabV3Plus(
+            encoder_name=encoder_name,
+            encoder_weights="imagenet",
+            in_channels=3,
+            classes=5  # 5 road layer classes
+        )
+        
+        self.device = "cuda" if use_cuda and torch.cuda.is_available() else "cpu"
+        self.model = self.model.to(self.device).eval()
     
-    # Group by layer and calculate averages
-    layer_counts = {}
-    for pred in predictions:
-        layer = pred.get("layer_name", "Unknown")
-        layer_counts[layer] = layer_counts.get(layer, 0) + 1
+    def segment(self, image):
+        """Perform semantic segmentation on input image."""
+        # Preprocess: resize, normalize, to tensor
+        input_tensor = self._preprocess(image)
+        
+        with torch.no_grad():
+            output = self.model(input_tensor)
+            labels = torch.argmax(output, dim=1).squeeze()
+        
+        return labels.cpu().numpy() + 1  # Convert to 1-indexed layers
+```
+
+#### 4. VLM Mode - GLM-4.6V API Analysis (`src/vlm_analyzer.py`)
+
+```python
+import requests
+import base64
+
+class VLMAnalyzer:
+    def __init__(self, api_key=None):
+        self.api_url = "https://zenmux.cloudflare-ai.top/v1/chat/completions"
+        self.api_key = api_key or os.getenv("ZENMUX_API_KEY")
     
-    # Build comprehensive conclusion with all layers
-    conclusion = f"Identified {total_instances} instances across {len(layer_counts)} layer types..."
+    def analyze_road_layer(self, image_path, temperature=0.3):
+        """Analyze road layer using GLM-4.6V vision model."""
+        # Encode image to base64
+        with open(image_path, "rb") as f:
+            image_base64 = base64.b64encode(f.read()).decode()
+        
+        # Construct prompt for road layer analysis
+        prompt = """Analyze this road construction image and identify the road layer.
+        Respond with: layer_number (1-5), layer_name, confidence (%), material description."""
+        
+        # Make API request
+        response = requests.post(
+            self.api_url,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={
+                "model": "glm-4v-flash",
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                    ]
+                }],
+                "temperature": temperature
+            }
+        )
+        
+        return self._parse_response(response.json())
+```
+
+#### 5. Hybrid Mode - Classical + VLM Fusion (`gui/main_window.py`)
+
+```python
+def run_hybrid_analysis(self, image, params):
+    """Run hybrid analysis combining Classical and VLM methods."""
+    # Step 1: Run Classical analysis
+    classical_result = self.run_classical(image, params)
+    classical_layer = classical_result["layer_number"]
+    classical_conf = classical_result["confidence"]
+    
+    # Step 2: Run VLM analysis for cross-validation
+    if params.get("hybrid_vlm_validation", True):
+        vlm_result = self.run_vlm(image, params)
+        vlm_layer = vlm_result["layer_number"]
+        vlm_conf = vlm_result["confidence"]
+        
+        # Step 3: Fuse results with weight balance
+        weight = params.get("classical_weight", 0.6)
+        
+        if classical_layer == vlm_layer:
+            # Agreement: combine confidence
+            final_layer = classical_layer
+            final_conf = weight * classical_conf + (1 - weight) * vlm_conf
+        else:
+            # Conflict: apply resolution rule
+            rule = params.get("hybrid_conflict_rule", "Higher Confidence")
+            if rule == "Higher Confidence":
+                final_layer = classical_layer if classical_conf > vlm_conf else vlm_layer
+                final_conf = max(classical_conf, vlm_conf)
+            elif rule == "Prefer Classical":
+                final_layer, final_conf = classical_layer, classical_conf
+            else:  # Prefer VLM
+                final_layer, final_conf = vlm_layer, vlm_conf
+    
+    return {"layer_number": final_layer, "confidence": final_conf}
+```
+
+#### 6. YOLOv11 Mode - Instance Segmentation (`src/yolo_analyzer.py`)
+
+```python
+from ultralytics import YOLO
+
+class YOLOAnalyzer:
+    def __init__(self, model_path="models/road_layers_yolov11.pt"):
+        self.model = YOLO(model_path)
+        self.class_names = {
+            0: "Subgrade", 1: "Subbase Course", 2: "Base Course",
+            3: "Binder Course", 4: "Surface Course"
+        }
+    
+    def analyze(self, image, confidence=0.5, iou=0.5, device="cuda"):
+        """Run YOLOv11 instance segmentation on image."""
+        # Run inference
+        results = self.model.predict(
+            source=image,
+            conf=confidence,
+            iou=iou,
+            device=device,
+            verbose=False
+        )[0]
+        
+        detections = []
+        if results.masks is not None:
+            for i, (box, mask, conf, cls) in enumerate(zip(
+                results.boxes.xyxy,
+                results.masks.data,
+                results.boxes.conf,
+                results.boxes.cls
+            )):
+                detections.append({
+                    "layer_number": int(cls) + 1,
+                    "layer_name": self.class_names.get(int(cls), "Unknown"),
+                    "confidence": float(conf),
+                    "bbox": box.cpu().numpy().tolist(),
+                    "mask": mask.cpu().numpy()
+                })
+        
+        return detections
+```
+
+#### 7. Preprocessing Techniques (`gui/main_window.py`)
+
+```python
+import cv2
+import numpy as np
+
+def apply_preprocessing(image, params, mode_prefix="cnn"):
+    """Apply user-selected preprocessing effects to image."""
+    result = image.copy()
+    
+    # Noise Reduction (Bilateral Filter - edge-preserving)
+    if params.get(f"{mode_prefix}_noise", False):
+        result = cv2.bilateralFilter(result, d=5, sigmaColor=25, sigmaSpace=25)
+    
+    # Contrast Enhancement (CLAHE on LAB color space)
+    if params.get(f"{mode_prefix}_contrast", False):
+        lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    # Sharpening (3x3 Laplacian Kernel)
+    if params.get(f"{mode_prefix}_sharpen", False):
+        kernel = np.array([[-1, -1, -1],
+                           [-1,  9, -1],
+                           [-1, -1, -1]])
+        result = cv2.filter2D(result, -1, kernel)
+    
+    # Edge Detection Overlay (Canny with green highlight)
+    if params.get(f"{mode_prefix}_edge", False):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, threshold1=50, threshold2=150)
+        result[edges > 0] = [0, 255, 0]  # Green edges
+    
+    return result
 ```
 
 ### Running the Application
