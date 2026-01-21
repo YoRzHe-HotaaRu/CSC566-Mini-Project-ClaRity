@@ -41,7 +41,6 @@ Accurate identification of road construction layers is essential for quality con
 | 2 | To implement **texture-based feature extraction** using GLCM (Contrast, Energy, Homogeneity, Correlation) and Local Binary Patterns (LBP) |
 | 3 | To provide a **multi-mode analysis interface** featuring Classical segmentation, Deep Learning (DeepLabv3+), VLM Analysis (GLM-4.6V), Hybrid validation, and YOLOv11 Instance Segmentation |
 | 4 | To deliver a **professional PyQt5 GUI** with real-time processing, visualization overlays, result dialogs, and PDF report generation |
-| 5 | To implement **CUDA GPU acceleration** for efficient processing of high-resolution satellite imagery |
 
 ---
 
