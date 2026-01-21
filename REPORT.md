@@ -52,8 +52,6 @@ The primary objective of this project is to develop an automated pipeline capabl
 | 2 | Implement **texture-based feature extraction** using GLCM (Contrast, Energy, Homogeneity, Correlation) and Local Binary Patterns (LBP) |
 | 3 | Provide a **multi-mode analysis interface** with 5 distinct analysis methods |
 | 4 | Deliver a **professional PyQt5 GUI** with real-time processing and visualization |
-| 5 | Implement **CUDA GPU acceleration** for efficient processing |
-| 6 | Integrate **configurable preprocessing options** (Sharpen, Edge Detection, Noise Reduction, CLAHE) |
 
 ### Objective Details
 
@@ -64,10 +62,6 @@ The primary objective of this project is to develop an automated pipeline capabl
 **Objective 3** recognizes that different analysis scenarios benefit from different approaches. Classical mode works well for clear textures, CNN provides semantic understanding, VLM offers AI-powered explanations, Hybrid combines methods for higher accuracy, and YOLOv11 enables real-time instance detection.
 
 **Objective 4** emphasizes user experience through a professional PyQt5 interface with a modern dark theme, intuitive drag-and-drop image loading, real-time progress feedback, and comprehensive PDF report generation for documentation purposes.
-
-**Objective 5** leverages GPU acceleration through CUDA to ensure fast inference times, especially for deep learning models like DeepLabv3+ and YOLOv11 that process high-resolution satellite imagery.
-
-**Objective 6** provides users with configurable preprocessing options that apply enhancements to the visualization output, including image sharpening, edge detection overlay, bilateral noise reduction, and CLAHE contrast enhancement in a 2×2 grid layout.
 
 ---
 
