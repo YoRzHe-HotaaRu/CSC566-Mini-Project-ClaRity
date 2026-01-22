@@ -163,7 +163,7 @@ CSC566-Mini-Project/
 
 ### API Key (in `.env`)
 ```env
-ZENMUX_API_KEY=sk-ai-v1-3460a902f67de8b0e509fa1b0bc6a490bb124c177574faa804d066f7217752bc
+ZENMUX_API_KEY=your_api_key_here
 ZENMUX_BASE_URL=https://zenmux.ai/api/v1
 VLM_MODEL=z-ai/glm-4.6v
 ```
